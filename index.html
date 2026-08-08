@@ -2681,15 +2681,18 @@ const UI = {
     UI.renderSide();
     const v = document.getElementById('v-'+UI.tab);
     if(!v) return;
-    ({
-      library:  ()=>Library.render(v),
-      prints:   ()=>Prints.render(v),
-      filament: ()=>Filament.render(v),
-      queue:    ()=>Queue.render(v),
-      dupes:    ()=>Dupes.render(v),
-      stats:    ()=>Stats.render(v),
-      settings: ()=>Settings.render(v)
-    })[UI.tab]();
+    /* Looked up rather than called straight off the object. Both places that
+       set the tab check it against TABS first, so this should never miss, but
+       dispatching on a name and calling whatever comes back means one bad
+       value takes the whole render down instead of falling back to the
+       library. It also stops the scanner flagging a dynamic call it cannot
+       prove is safe. */
+    const views = {
+      library:  Library, prints: Prints, filament: Filament,
+      queue:    Queue,   dupes:  Dupes,  stats:    Stats, settings: Settings
+    };
+    const view = Object.prototype.hasOwnProperty.call(views, UI.tab) ? views[UI.tab] : Library;
+    view.render(v);
     Thumbs.hydrate(v);
   },
 

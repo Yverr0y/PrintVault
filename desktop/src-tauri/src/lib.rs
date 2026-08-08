@@ -147,12 +147,24 @@ async fn pv_walk(root: String, skip: Vec<String>, max: Option<usize>) -> Result<
 }
 
 fn joined(root: &str, rel: &str) -> Result<PathBuf, String> {
-    // Reject anything that would climb out of the chosen root.
-    if rel.split(['/', '\\']).any(|s| s == "..") {
-        return Err("Path traversal rejected".into());
-    }
     let mut p = PathBuf::from(root);
+    // Split on '/' only, because that is what pv_walk joins with on every
+    // platform, and because a backslash is a perfectly legal character in a
+    // Linux filename. Splitting on it there would break real files.
     for seg in rel.split('/').filter(|s| !s.is_empty()) {
+        // Every segment has to be one plain name and nothing else. That rules
+        // out "..", and it also rules out the subtler case: PathBuf::push
+        // throws away everything it already holds if what you hand it is
+        // absolute or carries a drive prefix, so a lone segment of
+        // "C:\Windows" would silently move the whole operation outside the
+        // root. On Windows that parses as two components and is refused here;
+        // on Linux it is just an oddly named file, which is the right answer
+        // on both.
+        let mut parts = Path::new(seg).components();
+        match (parts.next(), parts.next()) {
+            (Some(std::path::Component::Normal(_)), None) => {}
+            _ => return Err("Path traversal rejected".into()),
+        }
         p.push(seg);
     }
     Ok(p)
