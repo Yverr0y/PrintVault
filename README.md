@@ -19,6 +19,12 @@ Nothing to install if you just want to try it: open
 [printvault.magikh0e.pl](https://printvault.magikh0e.pl/) in Chrome, Edge,
 Brave or Opera and point it at a folder.
 
+If you would rather look before handing over a folder, there is a demo at
+[/app/?demo](https://printvault.magikh0e.pl/app/?demo). It fills the app with
+an invented library so you can click around. It runs entirely in memory, so it
+cannot see or change a real library in the same browser, and it disappears when
+you close the tab.
+
 The desktop app is worth it if you have a lot of files, keep them on a network
 share, or are tired of re-granting folder access every session. Grab an
 installer from

@@ -61,6 +61,17 @@ code,kbd,.mono{font-family:var(--mono);font-size:.92em}
 
 /* ---------- layout ---------- */
 .pv-app{display:flex;flex-direction:column;height:100dvh}
+/* demo bar, sits above the header in the same column so nothing overlaps */
+.pv-demo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:0 0 auto;
+  padding:8px 14px;background:var(--acc-soft);border-bottom:1px solid var(--line);
+  font-size:13px;line-height:1.4}
+.pv-demo b{color:var(--acc)}
+.pv-demo span{color:var(--dim);min-width:0}
+.pv-demo a{margin-left:auto;white-space:nowrap;text-decoration:none;font-weight:600;
+  padding:5px 11px;border-radius:7px;background:var(--acc);color:#12141a}
+.pv-demo a.q{margin-left:0;background:transparent;color:var(--dim);border:1px solid var(--line)}
+.pv-demo a:hover{filter:brightness(1.08)}
+@media(max-width:640px){ .pv-demo span{flex:1 1 100%;order:3} .pv-demo a{margin-left:0} }
 .pv-top{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--bg2);border-bottom:1px solid var(--line);flex:0 0 auto;position:relative;z-index:30}
 .pv-brand{display:flex;align-items:center;gap:9px;font-weight:750;letter-spacing:-.02em;font-size:15px;white-space:nowrap;user-select:none}
 .pv-brand svg{width:22px;height:22px;flex:0 0 auto}
@@ -419,7 +430,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
  * Copyright (C) 2026 magikh0e
  * License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html)
  */
-const APP_VERSION = '0.2.19';
+const APP_VERSION = '0.2.20';
 
 /* ============================================================
    U — utilities
@@ -5955,14 +5966,388 @@ async function checkPerms(){
     ' ('+stale.slice(0,3).join(', ')+'). Browsers require a click to restore folder access.', null, 7000);
 }
 
+/* ============================================================
+   Demo — a throwaway library for ?demo, built in memory
+   ============================================================
+   Someone arriving from a link has no reason yet to hand us a folder, and
+   the app used to greet them with an empty grid and a file picker. This
+   fills it instead. Everything is generated at boot: no fixtures, no images
+   shipped, nothing fetched. The previews are real WebGL renders of meshes
+   built in code, which is why a demo library this size costs no bytes.
+
+   The storage layer is swapped for plain Maps before anything opens the
+   database, so the demo can neither see nor touch a real library sitting in
+   the same browser profile, and closing the tab is all it takes to undo it.
+*/
+const Demo = {
+  on: /(?:^|[?&])demo(?:[=&]|$)/.test(location.search),
+  _mem: null,
+
+  installDB(){
+    const mem = Demo._mem = {};
+    const st = s => mem[s] || (mem[s] = new Map());
+    STORES.forEach(st);
+    Object.assign(DB, {
+      open: ()=>Promise.resolve(null),
+      tx: ()=>Promise.reject(new Error('No transactions in demo mode')),
+      get: async (s,id)=>st(s).get(id),
+      all: async s=>Array.from(st(s).values()),
+      keys: async s=>Array.from(st(s).keys()),
+      put: async (s,v)=>{ st(s).set(v.id, v); return v.id; },
+      putMany: async (s,vals)=>{ (vals||[]).forEach(v=>st(s).set(v.id, v)); },
+      del: async (s,id)=>{ st(s).delete(id); },
+      delMany: async (s,ids)=>{ (ids||[]).forEach(id=>st(s).delete(id)); },
+      clear: async s=>{ st(s).clear(); },
+      byIndex: async (s,idx,val)=>Array.from(st(s).values()).filter(v=>v[idx]===val)
+    });
+  },
+
+  /* Nothing here has a file behind it, so anything reaching for one should
+     say why rather than surface a DOMException from three layers down. */
+  guard(){
+    const nope = ()=>Promise.reject(new Error('The demo has no files on disk. Download PrintVault to use your own library.'));
+    ['read','readTail','readRange','headTail','writeFile','deleteFile','renameFile',
+     'moveToQuarantine','mkdirp','pick'].forEach(k=>{ if(typeof FS[k]==='function') FS[k] = nope; });
+    ['btnAddRoot','btnScan'].forEach(id=>{ const el = document.getElementById(id); if(el) el.classList.add('hidden'); });
+  },
+
+  banner(){
+    const bar = document.createElement('div');
+    bar.className = 'pv-demo';
+    bar.innerHTML =
+      '<b>Demo library.</b>' +
+      '<span>Every model, print and spool below is invented, and nothing is saved. ' +
+      'The real thing reads a folder you already have.</span>' +
+      '<a href="/">Get PrintVault</a>' +
+      '<a class="q" href="./">Exit demo</a>';
+    const app = document.querySelector('.pv-app');
+    if(app) app.insertBefore(bar, app.firstChild);
+  },
+
+  /* --- geometry ------------------------------------------------------
+     Enough primitives to make three dozen cards look like different
+     objects. Winding is not policed because the shader flips the normal on
+     back faces anyway, the same reason a badly exported STL still lights. */
+
+  _tri(o,a,b,c){ o.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]); },
+  _quad(o,a,b,c,d){ Demo._tri(o,a,b,c); Demo._tri(o,a,c,d); },
+
+  _box(o, cx,cy,cz, w,d,h, rot){
+    const hw=w/2, hd=d/2, hh=h/2, c=Math.cos(rot||0), s=Math.sin(rot||0);
+    const p = [[-hw,-hd,-hh],[hw,-hd,-hh],[hw,hd,-hh],[-hw,hd,-hh],
+               [-hw,-hd,hh],[hw,-hd,hh],[hw,hd,hh],[-hw,hd,hh]]
+      .map(v=>[v[0]*c - v[1]*s + cx, v[0]*s + v[1]*c + cy, v[2]+cz]);
+    [[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]]
+      .forEach(q=>Demo._quad(o, p[q[0]], p[q[1]], p[q[2]], p[q[3]]));
+  },
+
+  _prism(o, cx,cy,z0, r, sides, h, rot){
+    const z1 = z0 + h, at = i => (rot||0) + i/sides*Math.PI*2;
+    const p = i => [cx + Math.cos(at(i))*r, cy + Math.sin(at(i))*r];
+    for(let i=0;i<sides;i++){
+      const a = p(i), b = p((i+1)%sides);
+      Demo._quad(o, [a[0],a[1],z0], [b[0],b[1],z0], [b[0],b[1],z1], [a[0],a[1],z1]);
+    }
+    for(let i=1;i<sides-1;i++){
+      const a = p(0), b = p(i), c = p(i+1);
+      Demo._tri(o, [a[0],a[1],z1], [b[0],b[1],z1], [c[0],c[1],z1]);
+      Demo._tri(o, [c[0],c[1],z0], [b[0],b[1],z0], [a[0],a[1],z0]);
+    }
+  },
+
+  _cone(o, cx,cy,z0, r, sides, h){
+    const tip = [cx,cy,z0+h], at = i => i/sides*Math.PI*2;
+    const p = i => [cx + Math.cos(at(i))*r, cy + Math.sin(at(i))*r, z0];
+    for(let i=0;i<sides;i++){
+      Demo._tri(o, p(i), p((i+1)%sides), tip);
+      Demo._tri(o, p((i+1)%sides), p(i), [cx,cy,z0]);
+    }
+  },
+
+  _mesh(kind){
+    const o = [];
+    if(kind === 'bin'){
+      Demo._box(o, 0,0,2, 46,32,4);                                  // floor
+      Demo._box(o, 0,-15,14, 46,2,24); Demo._box(o, 0,15,14, 46,2,24);
+      Demo._box(o, -22,0,14, 2,32,24); Demo._box(o, 22,0,14, 2,32,24);
+    } else if(kind === 'bracket'){
+      Demo._box(o, 0,0,3, 44,26,6);
+      Demo._box(o, -19,0,20, 6,26,34);
+      Demo._box(o, -12,0,10, 12,6,12, 0.6);                          // gusset
+    } else if(kind === 'gear'){
+      Demo._prism(o, 0,0,0, 18, 24, 9);
+      for(let i=0;i<12;i++) Demo._box(o, Math.cos(i/12*6.283)*21, Math.sin(i/12*6.283)*21, 4.5, 8,5,9, i/12*6.283);
+      Demo._prism(o, 0,0,-0.5, 5, 12, 10);
+    } else if(kind === 'hex'){
+      Demo._prism(o, 0,0,0, 22, 6, 7, 0.26);
+      Demo._prism(o, 0,0,7, 16, 6, 3, 0.26);
+    } else if(kind === 'tower'){
+      Demo._box(o, 0,0,4, 40,40,8); Demo._box(o, 0,0,16, 28,28,16); Demo._box(o, 0,0,30, 16,16,12);
+    } else if(kind === 'cone'){
+      Demo._prism(o, 0,0,0, 16, 20, 5);
+      Demo._cone(o, 0,0,5, 15, 20, 34);
+    } else if(kind === 'clip'){
+      Demo._box(o, 0,0,3, 34,18,6);
+      Demo._box(o, -15,0,15, 4,18,24); Demo._box(o, 15,0,15, 4,18,24);
+      Demo._box(o, -11,0,26, 12,18,4, 0.35);
+    } else if(kind === 'plate'){
+      Demo._box(o, 0,0,2, 58,40,4);
+      [[-24,-15],[24,-15],[-24,15],[24,15]].forEach(p=>Demo._prism(o, p[0],p[1],4, 3.5, 10, 9));
+      Demo._box(o, 0,0,6, 30,16,4);
+    } else if(kind === 'knob'){
+      Demo._prism(o, 0,0,0, 17, 28, 14);
+      for(let i=0;i<14;i++) Demo._box(o, Math.cos(i/14*6.283)*17, Math.sin(i/14*6.283)*17, 7, 3.5,3.5,14, i/14*6.283);
+      Demo._prism(o, 0,0,14, 12, 20, 3);
+    } else {                                                          // tile
+      Demo._box(o, 0,0,1.5, 54,54,3);
+      for(let x=-1;x<=1;x++) for(let y=-1;y<=1;y++) Demo._prism(o, x*17,y*17,3, 6.5, 6, 4, 0.26);
+    }
+    return new Float32Array(o);
+  },
+
+  _normals(pos){
+    const n = new Float32Array(pos.length);
+    for(let i=0;i<pos.length;i+=9){
+      const ax=pos[i+3]-pos[i], ay=pos[i+4]-pos[i+1], az=pos[i+5]-pos[i+2];
+      const bx=pos[i+6]-pos[i], by=pos[i+7]-pos[i+1], bz=pos[i+8]-pos[i+2];
+      let x=ay*bz-az*by, y=az*bx-ax*bz, z=ax*by-ay*bx;
+      const l=Math.hypot(x,y,z)||1; x/=l; y/=l; z/=l;
+      for(let k=0;k<9;k+=3){ n[i+k]=x; n[i+k+1]=y; n[i+k+2]=z; }
+    }
+    return n;
+  },
+
+  _bbox(pos){
+    let a=[Infinity,Infinity,Infinity], b=[-Infinity,-Infinity,-Infinity];
+    for(let i=0;i<pos.length;i+=3) for(let k=0;k<3;k++){
+      if(pos[i+k]<a[k]) a[k]=pos[i+k];
+      if(pos[i+k]>b[k]) b[k]=pos[i+k];
+    }
+    return {min:a, max:b, size:[b[0]-a[0], b[1]-a[1], b[2]-a[2]]};
+  },
+
+  /* --- content -------------------------------------------------------- */
+
+  SHAPES: ['bin','bracket','gear','hex','tower','cone','clip','plate','knob','tile'],
+  COLS: [[1,.545,.24],[.82,.84,.87],[.24,.62,.78],[.85,.28,.29],[.35,.72,.45],
+         [.55,.42,.78],[.96,.82,.28],[.28,.30,.34]],
+
+  MODELS: [
+    ['Spool Holder Bearing Mount','Printer Upgrades','bracket','functional,petg,tested'],
+    ['Filament Guide Clip','Printer Upgrades','clip','functional,fast'],
+    ['Nozzle Wrench Holder','Printer Upgrades','plate','tools,pla'],
+    ['Bed Probe Cover','Printer Upgrades','clip','functional,tpu'],
+    ['CFS Riser Left','Printer Upgrades','tower','petg,tested,v2'],
+    ['CFS Riser Right','Printer Upgrades','tower','petg,tested,v2'],
+    ['Camera Mount Arm','Printer Upgrades','bracket','functional,supports'],
+    ['Drybox Grommet','Printer Upgrades','knob','tpu,fast'],
+    ['Cable Chain Link','Printer Upgrades','clip','petg,functional'],
+    ['Drawer Divider 100mm','Household','bin','household,pla,fast'],
+    ['Cable Clip Set','Household','clip','household,fast'],
+    ['Wall Hook Heavy Duty','Household','bracket','household,petg,tested'],
+    ['Soap Dish Drain','Household','plate','household,petg'],
+    ['Fridge Handle Bracket','Household','bracket','household,repair,tested'],
+    ['Broom Wall Mount','Household','clip','household,pla'],
+    ['Toothbrush Holder','Household','bin','household,pla'],
+    ['Shelf Pin 5mm','Household','knob','repair,fast,petg'],
+    ['Hex Key Rack','Tools','plate','tools,pla,tested'],
+    ['Caliper Case','Tools','bin','tools,petg,supports'],
+    ['Bit Holder Quarter Inch','Tools','plate','tools,pla'],
+    ['Sanding Block 80mm','Tools','tower','tools,pla'],
+    ['Bench Hook','Tools','bracket','tools,petg'],
+    ['Articulated Dragon','Toys','tower','toys,multi-color,supports'],
+    ['Fidget Cube','Toys','tower','toys,fast,gift'],
+    ['Puzzle Box Level 3','Toys','bin','toys,tested,gift'],
+    ['Marble Run Straight','Toys','clip','toys,pla'],
+    ['Loud Whistle Six Tone','Toys','cone','toys,fast,gift'],
+    ['Rocket Nose Cone','Toys','cone','toys,supports'],
+    ['Multiboard 6x6 Tile','Multiboard','tile','multiboard,pla,tested'],
+    ['Multiboard Blank Label','Multiboard','plate','multiboard,fast'],
+    ['Multiboard Bin 2x2','Multiboard','bin','multiboard,petg'],
+    ['Multiboard Hook Pack','Multiboard','clip','multiboard,pla'],
+    ['Hexagon Coaster Set','Gifts','hex','gift,multi-color,fast'],
+    ['Photo Frame 4x6','Gifts','plate','gift,pla'],
+    ['Desk Nameplate','Gifts','plate','gift,multi-color'],
+    ['Plant Pot Drainage','Gifts','bin','gift,petg,tested'],
+    ['Dice Tower','Gifts','tower','gift,supports,toys'],
+    ['Gear Set 20T','Tools','gear','functional,tested,petg']
+  ],
+
+  CREATORS: ['bendbuilds','MakerOfThings','printedparts','TheFabLab','oddbits','shopcat',''],
+
+  _rng(seed){ let s = seed>>>0; return ()=>{ s = (s*1664525 + 1013904223)>>>0; return s/4294967296; }; },
+  _date(now, back){ return new Date(now - back*86400000).toISOString().slice(0,10); },
+
+  async seed(){
+    const now = Date.now(), day = 86400000, rnd = Demo._rng(20260814);
+    const root = {id:'dr', name:'3D Print Files', addedAt: now - 260*day, lastScan: now - 2*day,
+                  files:0, models:0, bytes:0, demo:true};
+
+    const models = [], files = [];
+    Demo.MODELS.forEach((row, i)=>{
+      const [name, coll, shape, tags] = row;
+      const folder = coll.replace(/ /g,'-');
+      const stem = name.replace(/ /g,'_');
+      const mpath = folder + '/' + stem;
+      const id = 'dm' + i;
+      const tris = 8000 + Math.floor(rnd()*90000);
+      const grams = 8 + Math.floor(rnd()*120);
+      const timeMin = 22 + Math.floor(rnd()*640);
+      const mat = /petg/.test(tags) ? 'PETG' : /tpu/.test(tags) ? 'TPU' : 'PLA';
+
+      const own = [];
+      const push = (fname, ext, kind, size, extra)=>{
+        const f = Object.assign({id:'df'+files.length, rootId:'dr', modelId:id,
+          path: mpath + '/' + fname, name: fname, ext, kind, size,
+          mtime: now - Math.floor(rnd()*220)*day}, extra||{});
+        files.push(f); own.push(f); return f;
+      };
+
+      const main = i % 3 === 0 ? 'stl' : '3mf';
+      push(stem + '.' + main, main, 'mesh', 240000 + Math.floor(rnd()*7.4e6));
+      if(i % 4 === 1) push(stem + '_plate_b.stl', 'stl', 'mesh', 180000 + Math.floor(rnd()*2.4e6));
+      if(i % 5 === 2) push(stem + '_0.2mm_' + mat + '_A1.gcode', 'gcode', 'gcode',
+        3.2e6 + Math.floor(rnd()*9e6),
+        {g:{timeMin, grams, material:mat, layerH:0.2, nozzle:0.4, printer:'Bambu A1'}});
+      if(i % 6 === 3) push('cover.png', 'png', 'image', 180000 + Math.floor(rnd()*900000));
+      if(i % 7 === 5) push('README.txt', 'txt', 'other', 900 + Math.floor(rnd()*3000));
+
+      models.push({
+        id, rootId:'dr', path: mpath, name,
+        tags: tags.split(','), collections:[coll],
+        source: i % 4 === 0 ? 'https://example.com/things/' + (10000+i) : '',
+        creator: Demo.CREATORS[i % Demo.CREATORS.length], license: i % 3 === 0 ? 'CC BY 4.0' : '',
+        notes: i % 9 === 4 ? 'Scaled to 105 percent, the original was a hair tight.' : '',
+        rating: i % 5 === 0 ? 5 : i % 3 === 0 ? 4 : 0,
+        favorite: i % 8 === 1,
+        thumbId: 'dt' + (i % 24), thumbSrc: 'embedded', shape,
+        fileCount: own.length, bytes: own.reduce((s,f)=>s+f.size,0),
+        meshCount: own.filter(f=>f.kind==='mesh').length,
+        gcodeCount: own.filter(f=>f.kind==='gcode').length,
+        imgCount: own.filter(f=>f.kind==='image').length,
+        innerCount: 0, inner: null, isArchive: false, archiveExt: null,
+        mtime: own.reduce((s,f)=>Math.max(s,f.mtime),0),
+        tris, est: {timeMin, grams, material:mat, layerH:0.2, nozzle:0.4, printer:'Bambu A1'},
+        createdAt: now - (200 - i*3)*day, updatedAt: now - Math.floor(rnd()*40)*day
+      });
+    });
+
+    /* A few genuine duplicates, because an empty Duplicates tab makes the
+       feature look broken rather than clean. Same hash, same size, two paths. */
+    const twin = (a, b, sha, size)=>{
+      const fa = files.find(f=>f.modelId==='dm'+a && f.kind==='mesh');
+      const fb = files.find(f=>f.modelId==='dm'+b && f.kind==='mesh');
+      if(!fa || !fb) return;
+      fa.sha = fb.sha = sha; fa.size = fb.size = size;
+      fb.path = fb.path.replace(/\.(stl|3mf)$/, ' (1).$1');
+      fb.name = fb.name.replace(/\.(stl|3mf)$/, ' (1).$1');
+    };
+    twin(4, 5, 'a91c4e77b2', 4180332);
+    twin(9, 30, 'c04b18ff3a', 1290448);
+    twin(1, 31, 'e7712a0c95', 763120);
+
+    root.files = files.length;
+    root.models = models.length;
+    root.bytes = files.reduce((s,f)=>s+f.size, 0);
+
+    const printers = [
+      {id:'dp1', name:'Bambu A1', model:'A1 with AMS Lite', bedX:256, bedY:256, bedZ:256,
+       nozzle:0.4, addr:'', apiKey:'', flavour:'moonraker', notes:'Workhorse.'},
+      {id:'dp2', name:'Voron 2.4', model:'350mm', bedX:350, bedY:350, bedZ:330,
+       nozzle:0.6, addr:'', apiKey:'', flavour:'moonraker', notes:'Built over a long winter.'}
+    ];
+
+    const filaments = [
+      ['df1','Polymaker','PLA','Galaxy Black','#22242a',1000,640,21.99],
+      ['df2','Prusament','PETG','Prusa Orange','#ff7a2f',1000,215,29.99],
+      ['df3','Bambu','PLA Basic','Matte Ivory','#efe7d8',1000,880,24.99],
+      ['df4','Sunlu','PLA+','Grey','#8a9099',1000,120,17.5],
+      ['df5','Overture','PETG','Teal','#2f9fb5',1000,455,23],
+      ['df6','eSun','TPU 95A','Red','#d94848',500,310,28],
+      ['df7','Bambu','PLA Basic','Bambu Green','#4fae5f',1000,70,24.99],
+      ['df8','Polymaker','ASA','White','#f2f2f0',1000,1000,32]
+    ].map(r=>({id:r[0], brand:r[1], material:r[2], colorName:r[3], colorHex:r[4],
+      spoolWeightG:r[5], remainingG:r[6], costPerKg:r[7], diameter:1.75,
+      tempNozzle: r[2].indexOf('PETG')===0 ? 240 : 215, tempBed: r[2].indexOf('PETG')===0 ? 80 : 60,
+      notes:'', archived:false, printer: r[0]==='df8' ? 'Voron 2.4' : 'Bambu A1'}));
+
+    const prints = [];
+    for(let j=0;j<28;j++){
+      const m = models[Math.floor(rnd()*models.length)];
+      const r = rnd();
+      const result = r > 0.86 ? 'fail' : r > 0.78 ? 'partial' : 'success';
+      const fil = filaments[Math.floor(rnd()*filaments.length)];
+      prints.push({
+        id:'dpr'+j, modelId:m.id, modelName:m.name,
+        date: Demo._date(now, Math.floor(rnd()*150)),
+        result, printer: rnd() > 0.35 ? 'Bambu A1' : 'Voron 2.4',
+        filamentId: fil.id, material: fil.material,
+        layerH: rnd() > 0.5 ? 0.2 : 0.28, nozzle: 0.4,
+        grams: Math.max(4, Math.round(m.est.grams * (0.7 + rnd()*0.6))),
+        timeMin: Math.max(15, Math.round(m.est.timeMin * (0.8 + rnd()*0.5))),
+        infill: [10,15,20,25,40][Math.floor(rnd()*5)],
+        notes: result === 'fail' ? 'Warped off the plate about an hour in.'
+             : result === 'partial' ? 'Usable, but the overhang needs supports next time.' : '',
+        createdAt: now - Math.floor(rnd()*150)*day
+      });
+    }
+
+    const queue = [
+      ['dq1','dm22','Articulated Dragon',1,'hi','Bambu A1','df3','For the school fair on Saturday.'],
+      ['dq2','dm28','Multiboard 6x6 Tile',6,'md','Voron 2.4','df1',''],
+      ['dq3','dm11','Wall Hook Heavy Duty',4,'md','Bambu A1','df2','Garage rail.'],
+      ['dq4','dm36','Dice Tower',1,'lo','','df5',''],
+      ['dq5','dm18','Caliper Case',1,'md','Bambu A1','df1','Needs supports.']
+    ].map((r,i)=>({id:r[0], modelId:r[1], name:r[2], qty:r[3], priority:r[4], printer:r[5],
+      filamentId:r[6], notes:r[7], status: i === 0 ? 'printing' : 'pending',
+      addedAt: now - (12 - i*2)*day}));
+
+    await DB.put('meta', {id:'settings', v:{
+      view:'grid', sort:'name', dir:'asc', sidebar:true, thumbSize:320,
+      defaultPrinter:'Bambu A1', currency:'$', costPerHour:0.15,
+      lastScan: now - 2*day, autoBackup:'off'
+    }});
+    await DB.putMany('roots', [root]);
+    await DB.putMany('models', models);
+    await DB.putMany('files', files);
+    await DB.putMany('printers', printers);
+    await DB.putMany('filaments', filaments);
+    await DB.putMany('prints', prints);
+    await DB.putMany('queue', queue);
+
+    await Demo.thumbs(models);
+  },
+
+  /* One render per shape and colour pair rather than one per model, so
+     thirty-eight cards cost roughly two dozen renders and stay instant. */
+  async thumbs(models){
+    const size = 320, done = new Set();
+    for(const m of models){
+      if(done.has(m.thumbId)) continue;
+      done.add(m.thumbId);
+      try{
+        const pos = Demo._mesh(m.shape);
+        const blob = await Render.toBlob(pos, Demo._normals(pos), Demo._bbox(pos),
+          {size, color: Demo.COLS[(parseInt(m.thumbId.slice(2),10)*3) % Demo.COLS.length],
+           az: -52 + (parseInt(m.thumbId.slice(2),10) % 5) * 9});
+        if(blob) await Thumbs.put(m.thumbId, blob);
+      }catch(e){ /* no WebGL here, the cards fall back to the cube icon */ }
+    }
+  }
+};
+
 (async function boot(){
   // The engine is worth showing at a glance: it decides whether folder access
   // is native or goes through the browser, which is the first thing to ask
   // about when something behaves unexpectedly.
   document.getElementById('verTag').textContent =
     'v'+APP_VERSION + (FS.kind === 'desktop' ? ' · desktop' : '');
+  // The swap has to happen before anything opens the database, otherwise the
+  // demo would be looking at, and writing over, a real library in this profile.
+  if(Demo.on){ Demo.installDB(); document.body.classList.add('demo'); }
   try{
     await DB.open();
+    if(Demo.on) await Demo.seed();
     await Store.load();
   }catch(e){
     Toast.err('Database failed to open: '+e.message);
@@ -5973,17 +6358,18 @@ async function checkPerms(){
   if(TABS.some(t=>t.id===h)) UI.tab = h;
   document.querySelectorAll('.pv-view').forEach(v=>v.classList.toggle('on', v.id === 'v-'+UI.tab));
   UI.render();
-  checkPerms();
-  Monitor.start();
-  AutoBackup.run();
-  if(!FS.supported || !FS.secure){
+  // None of these make sense against invented data: there are no folder
+  // permissions to check, no printer to poll and nowhere to write a backup.
+  if(Demo.on){ Demo.banner(); Demo.guard(); }
+  else { checkPerms(); Monitor.start(); AutoBackup.run(); }
+  if(!Demo.on && (!FS.supported || !FS.secure)){
     document.getElementById('btnAddRoot').classList.add('hidden');
     document.getElementById('btnScan').classList.add('hidden');
   }
 })();
 
 window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
-  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, APP_VERSION};
+  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, APP_VERSION};
 
 
 })();
