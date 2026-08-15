@@ -98,6 +98,20 @@ its filesystem layer when it loads, either the File System Access API or
 native calls through Tauri, and the other 96% of the code doesn't know or care
 which. No build step, no bundler, no dependencies.
 
+Adding `?demo` to the URL is handled the same way, one seam rather than a
+parallel code path. The `Demo` module swaps the storage layer for plain `Map`s
+before anything opens IndexedDB, then generates a library into it: models,
+files, prints, spools, a queue and a few deliberate duplicates. Everything
+above that layer runs exactly as it normally does, which is the point. Nothing
+is shipped to support it either. The previews are real WebGL renders of meshes
+built from primitives in code, so there are no screenshots baked into the file.
+
+Two consequences worth knowing if you're changing it. The demo can't reach a
+real library, because `DB.open` never runs, so a visitor poking at the demo
+cannot see or overwrite an actual index in the same browser profile. And
+anything that touches disk is stubbed to refuse with an explanation, since
+there is no folder behind any of it.
+
 ## Self-hosting the web version
 
 It's one file, so any static web server will do. From the folder containing
