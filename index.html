@@ -98,6 +98,11 @@ code,kbd,.mono{font-family:var(--mono);font-size:.92em}
 .pv-body{flex:1;display:flex;min-height:0}
 .pv-side{width:232px;flex:0 0 auto;background:var(--bg2);border-right:1px solid var(--line);overflow-y:auto;padding:10px 0 40px}
 .pv-side.hide{display:none}
+/* Hidden until the sidebar turns into an overlay, which is the only width
+   where it needs its own control. Tag-qualified because .b sets display and
+   is declared later, so a bare .hide-lg loses to it. */
+button.hide-lg{display:none}
+.pv-scrim{display:none}
 .pv-main{flex:1;overflow-y:auto;padding:16px 18px 60px;min-width:0}
 .pv-view{display:none}
 .pv-view.on{display:block}
@@ -362,6 +367,10 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
   .dt-hero{grid-template-columns:1fr}
   .pv-side{position:fixed;top:0;bottom:0;left:0;z-index:50;box-shadow:0 0 40px rgba(0,0,0,.5);padding-top:14px}
   .pv-side.hide{display:none}
+  /* The sidebar is an overlay at this width rather than a column, so it needs
+     a way out. Both the button and the scrim only exist down here. */
+  button.hide-lg{display:inline-flex}
+  .pv-scrim{position:fixed;inset:0;z-index:49;background:rgba(0,0,0,.5)}
   .fr,.fr3{grid-template-columns:1fr}
 }
 @media(max-width:640px){
@@ -378,7 +387,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
 <div class="pv-app">
 
   <header class="pv-top">
-    <button class="b g ico hide-lg" id="btnSide" title="Toggle sidebar" style="display:none"></button>
+    <button class="b g ico hide-lg" id="btnSide" title="Toggle sidebar" aria-expanded="false"></button>
     <div class="pv-brand">
       <svg viewBox="0 0 32 32" fill="none"><path d="M16 2 3 9v14l13 7 13-7V9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".45"/><path d="M3 9l13 6.6L29 9M16 15.6V30" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".45"/><path d="M16 2 3 9l13 6.6L29 9z" fill="var(--acc)" opacity=".9"/></svg>
       <span>Print<i>Vault</i></span>
@@ -396,6 +405,8 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
   </header>
 
   <nav class="pv-tabs" id="tabs"></nav>
+
+  <div class="pv-scrim" id="scrim"></div>
 
   <div class="pv-body">
     <aside class="pv-side" id="side"></aside>
@@ -430,7 +441,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
  * Copyright (C) 2026 magikh0e
  * License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html)
  */
-const APP_VERSION = '0.2.20';
+const APP_VERSION = '0.2.21';
 
 /* ============================================================
    U — utilities
@@ -491,6 +502,7 @@ const I = (function(){
     cube: s('<path d="M10 2 3 5.7v8.6L10 18l7-3.7V5.7z"/><path d="M3 5.7 10 9.4l7-3.7M10 9.4V18"/>'),
     grid: s('<rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/>'),
     list: s('<path d="M6.5 5h11M6.5 10h11M6.5 15h11M3 5h.01M3 10h.01M3 15h.01"/>'),
+    menu: s('<path d="M3 5.5h14M3 10h14M3 14.5h14"/>'),
     folder: s('<path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h3.2a1.5 1.5 0 0 1 1.2.6l.8 1.1a1.5 1.5 0 0 0 1.2.6h5.6A1.5 1.5 0 0 1 17 7.8V15a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 2 15z"/>'),
     tag: s('<path d="M2.5 9.2V3.8A1.3 1.3 0 0 1 3.8 2.5h5.4a1.3 1.3 0 0 1 .92.38l7 7a1.3 1.3 0 0 1 0 1.84l-5.4 5.4a1.3 1.3 0 0 1-1.84 0l-7-7a1.3 1.3 0 0 1-.38-.92z"/><circle cx="6.3" cy="6.3" r="1.15"/>'),
     star: s('<path d="M10 2.6l2.3 4.75 5.2.72-3.78 3.6.92 5.15L10 14.4l-4.64 2.42.92-5.15L2.5 8.07l5.2-.72z"/>'),
@@ -2679,6 +2691,21 @@ const UI = {
   page:1,
   PAGE:120,
 
+  /* Below this width the sidebar stops being a column and becomes an overlay
+     on top of the content, so whether it is open is a different question from
+     the desktop setting and starts closed. Keeping it in the settings would
+     mean a phone visit changes what the desktop does. */
+  sideOpen:false,
+  narrow(){ return window.matchMedia('(max-width:900px)').matches; },
+  setSide(open){
+    UI.sideOpen = open;
+    const b = document.getElementById('btnSide');
+    if(b) b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    UI.renderSide();
+    const sc = document.getElementById('scrim');
+    if(sc) sc.style.display = (open && UI.narrow() && UI.tab === 'library') ? 'block' : 'none';
+  },
+
   go(tab){
     UI.tab = tab; UI.page = 1;
     document.querySelectorAll('.pv-view').forEach(v=>v.classList.toggle('on', v.id === 'v'+'-'+tab));
@@ -2717,7 +2744,10 @@ const UI = {
 
   renderSide(){
     const side = document.getElementById('side');
-    side.classList.toggle('hide', !Store.settings.sidebar || UI.tab !== 'library');
+    const open = UI.narrow() ? UI.sideOpen : Store.settings.sidebar;
+    side.classList.toggle('hide', !open || UI.tab !== 'library');
+    const sc = document.getElementById('scrim');
+    if(sc) sc.style.display = (open && UI.narrow() && UI.tab === 'library') ? 'block' : 'none';
     if(UI.tab !== 'library') return;
     const f = UI.filter;
     const models = Store.models;
@@ -5924,6 +5954,37 @@ function applyTheme(){
 }
 
 function wire(){
+  /* The sidebar overlays the content on a phone, so without this there is no
+     way to get rid of it and it sits on top of the library. The button only
+     shows at that width; on a desktop it stays the column it always was. */
+  const btnSide = document.getElementById('btnSide');
+  btnSide.innerHTML = I.menu;
+  btnSide.onclick = ()=>{
+    if(UI.narrow()) UI.setSide(!UI.sideOpen);
+    else Library.toggleSide();
+  };
+  document.getElementById('scrim').onclick = ()=>UI.setSide(false);
+  // Tapping a filter should get you to the results, not leave the sidebar
+  // covering them. Capture phase, so the render the filter triggers is
+  // already the closed one.
+  document.getElementById('side').addEventListener('click', e=>{
+    if(!UI.narrow() || !e.target.closest('button,a')) return;
+    // Set the flag only. Calling setSide here would re-render the sidebar and
+    // tear out the button mid-click, so its own handler would never run.
+    UI.sideOpen = false;
+    btnSide.setAttribute('aria-expanded', 'false');
+  }, true);
+  /* Rotating a phone, or dragging a window across the breakpoint. Listening to
+     resize rather than the media query's change event because the sidebar's
+     open state is now width-dependent, and a width that settles late (a slow
+     first paint, a pane that sizes itself after load) would otherwise leave
+     the boot-time answer stuck on screen with nothing scheduled to correct it. */
+  let wasNarrow = UI.narrow();
+  window.addEventListener('resize', U.debounce(()=>{
+    const now = UI.narrow();
+    if(now !== wasNarrow){ wasNarrow = now; UI.setSide(false); }
+  }, 120));
+
   document.getElementById('btnAddRoot').onclick = ()=>Scan.addRoot();
   document.getElementById('btnScan').onclick = ()=>{
     if(!Store.roots.length) return Scan.addRoot();
@@ -6366,6 +6427,11 @@ const Demo = {
     document.getElementById('btnAddRoot').classList.add('hidden');
     document.getElementById('btnScan').classList.add('hidden');
   }
+  /* Whether the sidebar is a column or an overlay depends on the width, and
+     the width is not always final by the time boot reads it. Ask again once
+     the first frame has been laid out, otherwise a window that settled wide
+     after boot keeps the narrow answer and looks like a sidebar that vanished. */
+  requestAnimationFrame(()=>UI.renderSide());
 })();
 
 window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
