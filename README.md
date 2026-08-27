@@ -187,6 +187,11 @@ helps keep it going.
 
 Bug reports and folder layouts that break the scanner are just as useful.
 
+Something broken goes in [Issues](https://github.com/magikh0e/PrintVault/issues).
+Anything else, questions, a folder structure you can't get grouping sensibly,
+or a look at what your own library turned out to contain, goes in
+[Discussions](https://github.com/magikh0e/PrintVault/discussions).
+
 ## Licence
 
 GPL-3.0-or-later, see [LICENSE](LICENSE).
