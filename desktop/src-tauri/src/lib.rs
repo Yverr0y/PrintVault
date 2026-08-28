@@ -383,6 +383,7 @@ async fn pv_share(app: tauri::AppHandle, items: Vec<ShareItem>) -> Result<(), St
 fn show_share_sheet(window: &tauri::WebviewWindow, paths: &[String]) -> Result<(), String> {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
+    use objc2::AnyThread; // provides alloc() on the class
     use objc2_app_kit::{NSSharingServicePicker, NSWindow};
     use objc2_foundation::{NSArray, NSPoint, NSRect, NSRectEdge, NSSize, NSString, NSURL};
 
