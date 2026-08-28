@@ -39,6 +39,15 @@ walkdir = "2"
 # the IPC bridge. Also covers compression methods the browser cannot inflate.
 zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "zstd"] }
 
+# The macOS share sheet. These are already in the tree because Tauri itself
+# pulls them in on macOS, so this pins nothing new, it just makes them
+# directly callable. Kept target-specific so a Linux or Windows build does
+# not try to resolve AppKit.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSSharingService", "NSView", "NSWindow", "NSResponder", "NSGraphics"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSURL", "NSString", "NSGeometry"] }
+
 [profile.release]
 opt-level = "s"     # a webview shell, not a hot loop
 lto = true
