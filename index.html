@@ -502,7 +502,6 @@ const I = (function(){
     cube: s('<path d="M10 2 3 5.7v8.6L10 18l7-3.7V5.7z"/><path d="M3 5.7 10 9.4l7-3.7M10 9.4V18"/>'),
     grid: s('<rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/>'),
     list: s('<path d="M6.5 5h11M6.5 10h11M6.5 15h11M3 5h.01M3 10h.01M3 15h.01"/>'),
-    menu: s('<path d="M3 5.5h14M3 10h14M3 14.5h14"/>'),
     folder: s('<path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h3.2a1.5 1.5 0 0 1 1.2.6l.8 1.1a1.5 1.5 0 0 0 1.2.6h5.6A1.5 1.5 0 0 1 17 7.8V15a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 2 15z"/>'),
     tag: s('<path d="M2.5 9.2V3.8A1.3 1.3 0 0 1 3.8 2.5h5.4a1.3 1.3 0 0 1 .92.38l7 7a1.3 1.3 0 0 1 0 1.84l-5.4 5.4a1.3 1.3 0 0 1-1.84 0l-7-7a1.3 1.3 0 0 1-.38-.92z"/><circle cx="6.3" cy="6.3" r="1.15"/>'),
     star: s('<path d="M10 2.6l2.3 4.75 5.2.72-3.78 3.6.92 5.15L10 14.4l-4.64 2.42.92-5.15L2.5 8.07l5.2-.72z"/>'),
@@ -526,6 +525,8 @@ const I = (function(){
     sun: s('<circle cx="10" cy="10" r="3.6"/><path d="M10 1.8v1.7M10 16.5v1.7M3.9 3.9l1.2 1.2M14.9 14.9l1.2 1.2M1.8 10h1.7M16.5 10h1.7M3.9 16.1l1.2-1.2M14.9 5.1l1.2-1.2"/>'),
     moon: s('<path d="M17 11.4A7.3 7.3 0 1 1 8.6 3a5.7 5.7 0 0 0 8.4 8.4z"/>'),
     menu: s('<path d="M3 5.5h14M3 10h14M3 14.5h14"/>'),
+    // the macOS share glyph: a box with an arrow leaving the top
+    share: s('<path d="M10 2.5v9M6.8 5.7 10 2.5l3.2 3.2"/><path d="M5 9.5H3.8v6.7a1 1 0 0 0 1 1h10.4a1 1 0 0 0 1-1V9.5H15"/>'),
     warn: s('<path d="M8.6 3.1 1.9 14.5A1.6 1.6 0 0 0 3.3 17h13.4a1.6 1.6 0 0 0 1.4-2.5L11.4 3.1a1.6 1.6 0 0 0-2.8 0z"/><path d="M10 7.5v3.2M10 13.8h.01"/>'),
     clock: s('<circle cx="10" cy="10" r="7.5"/><path d="M10 5.6V10l2.8 1.7"/>'),
     weight: s('<path d="M4.2 6.5h11.6l1.7 9.3a1.2 1.2 0 0 1-1.2 1.4H3.7a1.2 1.2 0 0 1-1.2-1.4z"/><circle cx="10" cy="4.3" r="1.8"/>'),
@@ -1736,7 +1737,8 @@ const BrowserFS = Object.assign({}, FSCommon, {
 
   canOpenExternally: false,
   extractNatively: null,  // the browser build unpacks archives in JS
-  canSend: false          // no launching programs, no posting to your LAN
+  canSend: false,         // no launching programs, no posting to your LAN
+  canShare: false         // no system share sheet from a web page
 });
 
 /* ---------- Desktop: Tauri shell ---------- */
@@ -1835,6 +1837,18 @@ const DesktopFS = Object.assign({}, FSCommon, {
   /* Sending work out of the app: to a slicer on this machine, or to a printer
      on the network. Both are desktop only, the browser can do neither. */
   canSend: true,
+
+  /* The system share sheet, macOS only. Windows has one but only through a
+     far uglier interop path, and Linux has no standard equivalent, so the
+     button is simply absent elsewhere rather than there and disappointing.
+     The shell sets __PV_OS__ before any app JS runs. */
+  canShare: (typeof window.__PV_OS__ === 'string' && window.__PV_OS__ === 'macos'),
+  share(items){
+    return DesktopFS._call('pv_share', {
+      items: items.map(i=>({root: DesktopFS._root(i.rootId), rel: i.path}))
+    });
+  },
+
   async openWith(rootId, path, exe){
     await DesktopFS._call('pv_open_with', {root: DesktopFS._root(rootId), rel: path, exe: exe||''});
   },
@@ -2878,6 +2892,8 @@ const Library = {
       '<span class="cnt">'+all.length.toLocaleString()+(all.length===1?' model':' models')+'</span>'+
       '<div class="sp"></div>'+
       (Library.sel.size ? '<button class="b sm p" onclick="PV.Library.bulk()">'+I.tag+' Edit '+Library.sel.size+' selected</button>' : '')+
+      (Library.sel.size && FS.canShare
+        ? '<button class="b sm" onclick="PV.Share.open(Array.from(PV.Library.sel))">'+I.share+' Share</button>' : '')+
       (f.quick==='arch' && all.some(m=>m.archiveExt==='zip')
         ? '<button class="b sm p" onclick="PV.Archive.bulkPrompt()">'+I.dl+' Extract all</button>' : '')+
       '<div class="seg">'+
@@ -3217,6 +3233,7 @@ const Detail = {
       (m.source ? '<a class="b" href="'+U.attr(m.source)+'" target="_blank" rel="noopener noreferrer">'+I.ext+' Source</a>' : '')+
       '<button class="b g" onclick="PV.Detail.exclude()" title="Stop indexing this folder">'+I.eyeOff+' Ignore</button>'+
       (FS.canSend ? '<button class="b" onclick="PV.Send.open(\''+m.id+'\')">'+I.print+' Send</button>' : '')+
+      (FS.canShare ? '<button class="b" onclick="PV.Share.open(\''+m.id+'\')">'+I.share+' Share</button>' : '')+
       '<div class="sp"></div>'+
       '<button class="b" onclick="PV.Queue.add(\''+m.id+'\')">'+I.queue+' Queue</button>'+
       '<button class="b" onclick="PV.Detail.edit()">'+I.edit+' Edit</button>'+
@@ -4441,6 +4458,54 @@ const TagBox = {
    Desktop only. A browser page cannot launch a program, and it cannot POST
    to an unencrypted box on your network either.
    ============================================================ */
+/* ============================================================
+   Share — hand files to the system share sheet (macOS)
+   ============================================================
+   Asked for by someone who keeps getting "can you send me that thing you
+   printed" from family with their own printers, and was digging through
+   project folders in Finder to answer. */
+const Share = {
+  /* What a model actually means when you share it. A model can be a folder of
+     dozens of files and nobody wants to AirDrop a README, so this is the
+     printable geometry, or the archive itself when it was never unpacked. */
+  filesFor(m){
+    const files = Store.modelFiles(m.id);
+    if(m.isArchive){
+      const a = files.find(f=>f.kind === 'arch');
+      return a ? [a] : [];
+    }
+    const mesh = files.filter(f=>['stl','3mf','obj'].includes(f.ext));
+    return mesh.length ? mesh : files.filter(f=>isPrintable(f.ext));
+  },
+
+  async open(ids){
+    if(!FS.canShare) return;
+    const models = (Array.isArray(ids) ? ids : [ids]).map(id=>Store.model(id)).filter(Boolean);
+    if(!models.length) return Toast.err('Nothing to share');
+
+    const items = [];
+    const empty = [];
+    models.forEach(m=>{
+      const files = Share.filesFor(m);
+      if(!files.length) empty.push(m.name);
+      files.forEach(f=>items.push({rootId: f.rootId, path: f.path}));
+    });
+    if(!items.length){
+      return Toast.err(models.length === 1
+        ? 'No printable files in "' + models[0].name + '"'
+        : 'Nothing printable in those ' + models.length + ' models');
+    }
+    try{
+      await FS.share(items);
+      // The sheet itself is the feedback, so only say something when the
+      // selection was not what somebody would have assumed.
+      if(empty.length) Toast.err(empty.length + ' skipped, nothing printable in them');
+    }catch(e){
+      Toast.err(String(e && e.message || e));
+    }
+  }
+};
+
 const Send = {
   /* Sliced files first, since those are what a printer can actually run.
      Then project files, then plain meshes for the slicer. */
@@ -6434,7 +6499,7 @@ const Demo = {
   requestAnimationFrame(()=>UI.renderSide());
 })();
 
-window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
+window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
   UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, APP_VERSION};
 
 

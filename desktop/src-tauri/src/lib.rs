@@ -306,6 +306,123 @@ async fn pv_open_with(root: String, rel: String, exe: String) -> Result<(), Stri
         .map_err(|e| format!("Could not start {}: {}", program.display(), e))
 }
 
+/// Hand files to the system share sheet.
+///
+/// macOS only. Windows has an equivalent but reaching it means going through
+/// IDataTransferManagerInterop, and Linux has no standard sheet at all, so the
+/// button is hidden off macOS rather than pretending. The command still exists
+/// on every platform so the invoke handler does not need to be conditional;
+/// elsewhere it just says so.
+/// One file to share. Carries its own root so a selection spanning two
+/// libraries still validates each path against the folder it came from.
+#[derive(serde::Deserialize)]
+// Off macOS the stub ignores these, but the shape still has to deserialize so
+// the frontend can call the command and get a sentence back rather than an
+// argument mismatch.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub struct ShareItem {
+    root: String,
+    rel: String,
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn pv_share(_items: Vec<ShareItem>) -> Result<(), String> {
+    Err("The share sheet is only available on macOS".into())
+}
+
+/// The macOS one. Everything AppKit here has to happen on the main thread, so
+/// the paths are resolved and checked first and only the picker itself is
+/// handed over, then we wait for it to report back.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn pv_share(app: tauri::AppHandle, items: Vec<ShareItem>) -> Result<(), String> {
+    use tauri::Manager;
+
+    // A whole library handed to a share sheet helps nobody and takes a while
+    // to build. Well above any real selection, low enough to stay responsive.
+    const MAX: usize = 60;
+    if items.len() > MAX {
+        return Err(format!(
+            "That is {} files. Share {} or fewer at a time.",
+            items.len(),
+            MAX
+        ));
+    }
+
+    let mut paths: Vec<String> = Vec::new();
+    for it in &items {
+        let p = joined(&it.root, &it.rel)?;
+        // A share sheet that opens on a file that has moved is worse than an
+        // error, because the failure surfaces inside Mail or Messages instead.
+        if !p.is_file() {
+            return Err(format!("{} is no longer there", it.rel));
+        }
+        paths.push(p.to_string_lossy().into_owned());
+    }
+    if paths.is_empty() {
+        return Err("Nothing to share".into());
+    }
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "No main window".to_string())?;
+    let anchor = window.clone();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    window
+        .run_on_main_thread(move || {
+            let _ = tx.send(show_share_sheet(&anchor, &paths));
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())?
+}
+
+/// Build and show the picker. Main thread only, called from pv_share.
+#[cfg(target_os = "macos")]
+fn show_share_sheet(window: &tauri::WebviewWindow, paths: &[String]) -> Result<(), String> {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::AnyThread; // provides alloc() on the class
+    use objc2_app_kit::{NSSharingServicePicker, NSWindow};
+    use objc2_foundation::{NSArray, NSPoint, NSRect, NSRectEdge, NSSize, NSString, NSURL};
+
+    let ptr = window.ns_window().map_err(|e| e.to_string())? as *mut NSWindow;
+    if ptr.is_null() {
+        return Err("No native window to anchor to".into());
+    }
+
+    unsafe {
+        let ns_window: &NSWindow = &*ptr;
+        let view = ns_window
+            .contentView()
+            .ok_or_else(|| "Window has no content view".to_string())?;
+
+        let items: Vec<Retained<AnyObject>> = paths
+            .iter()
+            .map(|p| {
+                let url = NSURL::fileURLWithPath(&NSString::from_str(p));
+                Retained::cast_unchecked::<AnyObject>(url)
+            })
+            .collect();
+        let items = NSArray::from_retained_slice(&items);
+
+        let picker = NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), &items);
+
+        /* Anchored to the top right of the window, near where the button that
+           opens it sits. AppKit's default view coordinates put the origin at
+           the bottom left, so the top edge is y = height. This is the part
+           most likely to want nudging once somebody sees it on a real screen. */
+        let bounds = view.bounds();
+        let rect = NSRect::new(
+            NSPoint::new(bounds.size.width - 60.0, bounds.size.height - 4.0),
+            NSSize::new(1.0, 1.0),
+        );
+        picker.showRelativeToRect_ofView_preferredEdge(rect, &view, NSRectEdge::MinY);
+    }
+    Ok(())
+}
+
 /// Pick a program, for choosing a slicer in settings.
 #[tauri::command]
 async fn pv_pick_exe(app: tauri::AppHandle) -> Option<String> {
@@ -702,16 +819,20 @@ pub fn run() {
             pv_printer_send,
             pv_printer_status,
             pv_extract,
+            pv_share,
             pv_root_ok
         ])
         .setup(|app| {
             let _ = APP.set(app.handle().clone());
 
             // Tells the page it is running in the desktop shell, before any app
-            // JS runs, so FS can pick its implementation at load time.
+            // JS runs, so FS can pick its implementation at load time. The OS
+            // goes with it because some things exist on one platform only, and
+            // the version string alone cannot tell a Mac from a PC.
             let init = format!(
-                "window.__PV_DESKTOP__ = {};",
-                serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap()
+                "window.__PV_DESKTOP__ = {}; window.__PV_OS__ = {};",
+                serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap(),
+                serde_json::to_string(std::env::consts::OS).unwrap()
             );
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
