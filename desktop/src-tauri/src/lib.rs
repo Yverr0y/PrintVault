@@ -233,6 +233,22 @@ async fn pv_remove(root: String, rel: String) -> Result<(), String> {
     fs::remove_file(&p).map_err(|e| e.to_string())
 }
 
+/// Remove a directory, but only if it is already empty.
+///
+/// Deliberately remove_dir and not remove_dir_all. Deleting a model empties
+/// its folder and leaving the husk behind is untidy, but a recursive delete
+/// here would be a loaded gun pointed at somebody's library. Non-recursive
+/// cannot take anything with it: if the folder still holds something, this
+/// simply fails and the caller shrugs.
+#[tauri::command]
+async fn pv_remove_dir(root: String, rel: String) -> Result<(), String> {
+    let p = joined(&root, &rel)?;
+    if !p.is_dir() {
+        return Err("Not a folder".into());
+    }
+    fs::remove_dir(&p).map_err(|e| e.to_string())
+}
+
 /// Move within the same root. Falls back to copy-then-delete when the source
 /// and destination are on different filesystems.
 #[tauri::command]
@@ -820,6 +836,7 @@ pub fn run() {
             pv_printer_status,
             pv_extract,
             pv_share,
+            pv_remove_dir,
             pv_root_ok
         ])
         .setup(|app| {
