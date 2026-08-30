@@ -313,11 +313,39 @@ async fn pv_open_with(root: String, rel: String, exe: String) -> Result<(), Stri
     if !program.exists() {
         return Err(format!("No program at {}", program.display()));
     }
+    /* On macOS an application is a bundle, which is a directory rather than
+       something you can exec. Handing /Applications/BambuStudio.app straight
+       to Command::new fails with EACCES, "Permission denied (os error 13)",
+       which reads like a sandbox problem and is not one. Bundles have to go
+       through Launch Services instead.
+
+       The bundle check matters: the file picker puts no filter on macOS, so
+       somebody can just as well point this at a plain UNIX binary, and those
+       still have to be run directly. Diagnosed by Howard Aron, who hit it with
+       Bambu Studio and sent the fix. */
+    #[cfg(target_os = "macos")]
+    let spawned = {
+        let is_bundle = program.is_dir()
+            || program
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("app"));
+        if is_bundle {
+            std::process::Command::new("/usr/bin/open")
+                .arg("-a")
+                .arg(&program)
+                .arg(&p)
+                .spawn()
+        } else {
+            std::process::Command::new(&program).arg(&p).spawn()
+        }
+    };
+
     // Spawned, not waited on. A slicer takes seconds to appear and the window
     // should not sit frozen until someone closes it.
-    std::process::Command::new(&program)
-        .arg(&p)
-        .spawn()
+    #[cfg(not(target_os = "macos"))]
+    let spawned = std::process::Command::new(&program).arg(&p).spawn();
+
+    spawned
         .map(|_| ())
         .map_err(|e| format!("Could not start {}: {}", program.display(), e))
 }
