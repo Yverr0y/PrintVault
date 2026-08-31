@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in PrintVault does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The two things that save the most back and
+        forth are the exact error text and which platform you are on, because
+        the desktop app is developed on Windows and the macOS and Linux builds
+        get very little use.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected instead.
+      placeholder: |
+        I opened a model and clicked Send, then Open in slicer.
+        It said "Permission denied (os error 13)".
+        I expected the slicer to open with the file.
+    validations:
+      required: true
+
+  - type: input
+    id: error
+    attributes:
+      label: Exact error text
+      description: Copy it verbatim if there was one. Leave blank if not.
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Which build
+      options:
+        - Desktop app
+        - Browser
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: PrintVault version
+      description: Shown next to the logo, top left. For example 0.2.23.
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: The files involved
+      description: |
+        Only if it is about particular files. Folder layout, file types and
+        rough sizes are usually enough. Do not upload models, they are large
+        and I probably do not need them.
+      placeholder: |
+        Artist/Collection/Model/Version A/Kit 1/part.stl
+        About 40 MB per file, 12 files in the folder.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: |
+        If you have already found the cause, say so here. Very welcome, but
+        not expected. A report with no diagnosis is still a good report.

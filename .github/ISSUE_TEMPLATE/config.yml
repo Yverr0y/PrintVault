@@ -1,0 +1,8 @@
+# Questions and ideas belong in Discussions, so the tracker stays things that
+# are actually broken. Blank issues stay on: somebody with a report that does
+# not fit the form should not be turned away by it.
+blank_issues_enabled: true
+contact_links:
+  - name: Question, or an idea for a feature
+    url: https://github.com/magikh0e/PrintVault/discussions
+    about: Anything that is not broken. Folder layouts it groups badly are especially welcome.
