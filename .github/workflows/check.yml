@@ -15,6 +15,11 @@ on:
     branches: ["**"]
   pull_request:
 
+# This only ever reads the repo. It creates nothing, uploads nothing and
+# touches no release, so the token it runs with should not be able to either.
+permissions:
+  contents: read
+
 # A second push to the same branch makes the first run pointless.
 concurrency:
   group: check-${{ github.ref }}
