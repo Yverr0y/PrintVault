@@ -175,6 +175,10 @@ input[type=checkbox]{width:auto;accent-color:var(--acc);cursor:pointer}
 /* ---------- model grid ---------- */
 .pv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:13px}
 .pv-card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:border-color .13s,transform .13s,box-shadow .13s;position:relative}
+/* Keyboard focus only. focus-visible keeps the ring off a plain mouse click,
+   where it reads as a stuck selection. */
+.pv-card:focus{outline:none}
+.pv-card:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-color:var(--acc)}
 .pv-card:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--sh)}
 .pv-card.sel{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
 .pv-thumb{aspect-ratio:4/3;background:var(--bg3);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
@@ -525,6 +529,7 @@ const I = (function(){
     sun: s('<circle cx="10" cy="10" r="3.6"/><path d="M10 1.8v1.7M10 16.5v1.7M3.9 3.9l1.2 1.2M14.9 14.9l1.2 1.2M1.8 10h1.7M16.5 10h1.7M3.9 16.1l1.2-1.2M14.9 5.1l1.2-1.2"/>'),
     moon: s('<path d="M17 11.4A7.3 7.3 0 1 1 8.6 3a5.7 5.7 0 0 0 8.4 8.4z"/>'),
     menu: s('<path d="M3 5.5h14M3 10h14M3 14.5h14"/>'),
+    dots: s('<circle cx="4.2" cy="10" r="1.15"/><circle cx="10" cy="10" r="1.15"/><circle cx="15.8" cy="10" r="1.15"/>'),
     // the macOS share glyph: a box with an arrow leaving the top
     share: s('<path d="M10 2.5v9M6.8 5.7 10 2.5l3.2 3.2"/><path d="M5 9.5H3.8v6.7a1 1 0 0 0 1 1h10.4a1 1 0 0 0 1-1V9.5H15"/>'),
     warn: s('<path d="M8.6 3.1 1.9 14.5A1.6 1.6 0 0 0 3.3 17h13.4a1.6 1.6 0 0 0 1.4-2.5L11.4 3.1a1.6 1.6 0 0 0-2.8 0z"/><path d="M10 7.5v3.2M10 13.8h.01"/>'),
@@ -792,6 +797,28 @@ const Modal = {
       '<button class="b '+(danger?'d':'p')+'" id="mYes">'+U.esc(yesLabel||'Confirm')+'</button>');
     document.getElementById('mYes').onclick = ()=>{ Modal.close(); onYes(); };
   },
+  /* Same as confirm, but you have to type the word before the button works.
+     For the handful of actions that destroy many files at once and cannot be
+     undone. The point is not that typing is hard, it is that it interrupts
+     the muscle memory of clicking through a dialog you have seen before. */
+  confirmTyped(title, msg, phrase, onYes, yesLabel){
+    Modal.open(title,
+      '<div style="margin:0 0 4px;line-height:1.65;color:var(--dim)">'+msg+'</div>'+
+      '<label style="display:block;margin-top:14px;font-size:12.5px;color:var(--dim)">Type '+
+        '<b class="mono" style="color:var(--txt)">'+U.esc(phrase)+'</b> to confirm</label>'+
+      '<input id="mPhrase" class="mono" autocomplete="off" spellcheck="false" '+
+        'style="margin-top:6px;width:100%" placeholder="'+U.attr(phrase)+'">',
+      '<button class="b" onclick="PV.Modal.back()">Cancel</button>'+
+      '<button class="b d" id="mYes" disabled>'+U.esc(yesLabel||'Confirm')+'</button>');
+
+    const inp = document.getElementById('mPhrase'), yes = document.getElementById('mYes');
+    const check = ()=>{ yes.disabled = inp.value.trim().toUpperCase() !== phrase.toUpperCase(); };
+    inp.addEventListener('input', check);
+    // Enter should not fire a disabled button, but it should work once armed
+    inp.addEventListener('keydown', e=>{ if(e.key === 'Enter' && !yes.disabled){ e.preventDefault(); yes.click(); } });
+    yes.onclick = ()=>{ if(yes.disabled) return; Modal.close(); onYes(); };
+    setTimeout(()=>inp.focus(), 30);
+  },
   val(id){ const e=document.getElementById(id); return e ? (e.type==='checkbox'? e.checked : e.value) : ''; },
   num(id){ const v=parseFloat(Modal.val(id)); return isFinite(v)?v:null; }
 };
@@ -803,6 +830,37 @@ document.addEventListener('keydown', e=>{
     e.preventDefault(); Viewer.step(e.key==='ArrowRight' ? 1 : -1);
   }
   else if(e.key==='/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){ e.preventDefault(); document.getElementById('q').focus(); }
+
+  /* Arrow keys around the grid, Enter to open. The cards are
+     real focusable elements rather than an index kept in a variable, so the
+     browser draws the focus ring, Tab still works, and screen readers get
+     told what each card is. Column count is measured from where the cards
+     actually sit rather than assumed, because the grid is auto-fill and the
+     number changes with the window. */
+  else if(/^(ArrowRight|ArrowLeft|ArrowUp|ArrowDown|Enter|Home|End)$/.test(e.key)
+          && !document.getElementById('ovl').classList.contains('on')
+          && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){
+    const cards = [...document.querySelectorAll('#v-library .pv-card')];
+    if(!cards.length) return;
+    const cur = document.activeElement.closest ? document.activeElement.closest('.pv-card') : null;
+    if(!cur){
+      // nothing focused yet: the first arrow press picks up the first card
+      if(e.key !== 'Enter'){ e.preventDefault(); cards[0].focus(); }
+      return;
+    }
+    if(e.key === 'Enter'){ e.preventDefault(); Detail.open(cur.dataset.id); return; }
+    const i = cards.indexOf(cur);
+    const top = Math.round(cards[0].getBoundingClientRect().top);
+    const perRow = Math.max(1, cards.filter(c=>Math.round(c.getBoundingClientRect().top) === top).length);
+    let n = i;
+    if(e.key === 'ArrowRight') n = i + 1;
+    else if(e.key === 'ArrowLeft') n = i - 1;
+    else if(e.key === 'ArrowDown') n = i + perRow;
+    else if(e.key === 'ArrowUp') n = i - perRow;
+    else if(e.key === 'Home') n = 0;
+    else if(e.key === 'End') n = cards.length - 1;
+    if(n >= 0 && n < cards.length){ e.preventDefault(); cards[n].focus(); }
+  }
 });
 
 /* ============================================================
@@ -1605,6 +1663,21 @@ const BrowserFS = Object.assign({}, FSCommon, {
   async *walk(root, skip, stats){
     yield* BrowserFS._walk(root.handle, '', skip, 0, stats);
   },
+
+  /* List one subfolder, paths relative to it. Used for the quarantine view,
+     which has to look inside a folder the scanner deliberately ignores.
+     Walking the whole root and filtering would mean enumerating an entire
+     library to show a handful of files. */
+  async listDir(rootId, sub){
+    const r = Store.root(rootId);
+    if(!r || !r.handle) throw new Error('Folder is not connected');
+    let dir;
+    try{ dir = await BrowserFS.resolveDir(r.handle, sub); }
+    catch(e){ return []; }                     // nothing quarantined yet
+    const out = [];
+    for await (const f of BrowserFS._walk(dir, '', new Set(), 0, null)) out.push(f);
+    return out;
+  },
   async *_walk(handle, base, skip, depth, stats){
     depth = depth || 0;
     if(depth > 24){ if(stats) stats.tooDeep++; return; }
@@ -1669,15 +1742,22 @@ const BrowserFS = Object.assign({}, FSCommon, {
     return dir;
   },
 
-  async moveToQuarantine(rootId, path, quarantineDir){
+  moveToQuarantine(rootId, path, quarantineDir){
+    return BrowserFS.move(rootId, path, quarantineDir + '/' + path);
+  },
+
+  /* Move a file anywhere inside the root. Quarantining and restoring are the
+     same operation in opposite directions, so they share one implementation
+     and one copy verification rather than each having their own. */
+  async move(rootId, from, to){
     const r = Store.root(rootId);
     if(!r || !r.handle) throw new Error('Folder is not connected');
     if(!(await BrowserFS.ensure(r, 'readwrite'))) throw new Error('Write permission denied');
-    const srcDir = await BrowserFS.resolveDir(r.handle, U.dir(path));
-    const srcName = U.base(path);
+    const srcDir = await BrowserFS.resolveDir(r.handle, U.dir(from));
+    const srcName = U.base(from);
     const fh = await srcDir.getFileHandle(srcName);
 
-    const segs = [quarantineDir].concat(path.split('/').filter(Boolean));
+    const segs = to.split('/').filter(Boolean);
     let dir = r.handle;
     for(let i=0;i<segs.length-1;i++) dir = await dir.getDirectoryHandle(segs[i], {create:true});
     const leaf = segs[segs.length-1];
@@ -1704,6 +1784,18 @@ const BrowserFS = Object.assign({}, FSCommon, {
     if(!(await BrowserFS.ensure(r, 'readwrite'))) throw new Error('Write permission denied');
     const dir = await BrowserFS.resolveDir(r.handle, U.dir(path));
     await dir.removeEntry(U.base(path));
+  },
+
+  /* Is something already at this path? Asked before putting a quarantined
+     file back, so a restore never writes over whatever took its place. */
+  async exists(rootId, path){
+    const r = Store.root(rootId);
+    if(!r || !r.handle) return false;
+    try{
+      const dir = await BrowserFS.resolveDir(r.handle, U.dir(path));
+      await dir.getFileHandle(U.base(path));
+      return true;
+    }catch(e){ return false; }
   },
 
   /* Remove a folder only if it is already empty. No recursive flag on purpose:
@@ -1815,14 +1907,30 @@ const DesktopFS = Object.assign({}, FSCommon, {
   },
 
   async moveToQuarantine(rootId, path, quarantineDir){
-    const to = quarantineDir + '/' + path;
-    await DesktopFS._call('pv_move', {root: DesktopFS._root(rootId), from: path, to});
+    await DesktopFS.move(rootId, path, quarantineDir + '/' + path);
+  },
+  async move(rootId, from, to){
+    await DesktopFS._call('pv_move', {root: DesktopFS._root(rootId), from, to});
+  },
+  /* Walk starting inside the subfolder, so listing quarantine costs a walk of
+     quarantine rather than a walk of the whole library. */
+  async listDir(rootId, sub){
+    try{
+      const res = await DesktopFS._call('pv_walk', {
+        root: DesktopFS._root(rootId) + '/' + sub, skip: [], max: 200000
+      });
+      return res.files.map(f=>({name:f.name, path:f.path, size:f.size, mtime:f.mtime}));
+    }catch(e){ return []; }                    // folder does not exist yet
   },
   async deleteFile(rootId, path){
     await DesktopFS._call('pv_remove', {root: DesktopFS._root(rootId), rel: path});
   },
   async removeDir(rootId, path){
     await DesktopFS._call('pv_remove_dir', {root: DesktopFS._root(rootId), rel: path});
+  },
+  async exists(rootId, path){
+    try{ return await DesktopFS._call('pv_exists', {root: DesktopFS._root(rootId), rel: path}); }
+    catch(e){ return false; }
   },
   async writeFile(rootId, path, blob){
     const data = Array.from(new Uint8Array(await blob.arrayBuffer()));
@@ -2976,7 +3084,8 @@ const Library = {
     if(p.length) badges += '<span class="bdg ok">printed '+p.length+'&times;</span>';
     const tags = (m.tags||[]).slice(0,3).map(t=>'<span class="tg">'+U.esc(t)+'</span>').join('')+
                  ((m.tags||[]).length>3 ? '<span class="tg">+'+((m.tags||[]).length-3)+'</span>' : '');
-    return '<div class="pv-card'+(sel?' sel':'')+'" onclick="PV.Library.click(event,\''+m.id+'\')">'+
+    return '<div class="pv-card'+(sel?' sel':'')+'" tabindex="0" role="button" data-id="'+U.attr(m.id)+'" '+
+      'aria-label="'+U.attr(m.name)+'" onclick="PV.Library.click(event,\''+m.id+'\')">'+
       '<div class="pv-thumb">'+
         (m.thumbId ? '<img data-thumb="'+U.attr(m.thumbId)+'" alt="" loading="lazy">'
                    : '<span class="ph">'+I.cube+'</span>')+
@@ -3218,11 +3327,12 @@ const Detail = {
         extras+
         '<span class="ext '+cls+'">'+U.esc(f.ext)+'</span>'+
         '<span class="z" style="min-width:56px;text-align:right">'+U.bytes(f.size)+'</span>'+
+        /* One contextual action and a menu, rather than five icons. Five made
+           the row scroll sideways on a phone and gave every file the same
+           visual weight as the thing you came to do. */
         (['stl','3mf','obj'].includes(f.ext) ? '<button class="b g sm ico" title="3D view" onclick="PV.Viewer.open(\''+f.id+'\')">'+I.eye+'</button>' : '')+
         (f.kind==='image' ? '<button class="b g sm ico" title="Use as cover" onclick="PV.Detail.setCover(\''+f.id+'\')">'+I.img+'</button>' : '')+
-        '<button class="b g sm ico" title="Save a copy" onclick="PV.Detail.save(\''+f.id+'\')">'+I.dl+'</button>'+
-        '<button class="b g sm ico" title="Rename on disk" onclick="PV.Detail.renameFile(\''+f.id+'\')">'+I.edit+'</button>'+
-        '<button class="b g sm ico dgr" title="Delete from disk" onclick="PV.Detail.deleteFile(\''+f.id+'\')">'+I.trash+'</button>'+
+        '<button class="b g sm ico" title="More" onclick="PV.Detail.fileMenu(\''+f.id+'\')">'+I.dots+'</button>'+
         '</div>';
     }).join('');
     h += '</div>';
@@ -3242,17 +3352,61 @@ const Detail = {
     return h;
   },
 
+  /* Five actions, not nine. This row had grown to the point where it
+     overflowed sideways on a desktop and stood four rows tall on a phone,
+     which buries the thing you actually came here to do. What stays is what
+     you reach for on an ordinary visit; the rest lives behind More. Delete in
+     particular has no business sitting one slip away from Log print. */
   footer(m){
-    return '<button class="b" onclick="PV.Detail.copyPath()">'+I.link+' Copy path</button>'+
-      (m.source ? '<a class="b" href="'+U.attr(m.source)+'" target="_blank" rel="noopener noreferrer">'+I.ext+' Source</a>' : '')+
-      '<button class="b g" onclick="PV.Detail.exclude()" title="Stop indexing this folder">'+I.eyeOff+' Ignore</button>'+
-      '<button class="b d" onclick="PV.Detail.deleteModel()" title="Remove every file in this model">'+I.trash+' Delete</button>'+
+    return '<button class="b g" onclick="PV.Detail.more()">'+I.dots+' More</button>'+
       (FS.canSend ? '<button class="b" onclick="PV.Send.open(\''+m.id+'\')">'+I.print+' Send</button>' : '')+
       (FS.canShare ? '<button class="b" onclick="PV.Share.open(\''+m.id+'\')">'+I.share+' Share</button>' : '')+
       '<div class="sp"></div>'+
       '<button class="b" onclick="PV.Queue.add(\''+m.id+'\')">'+I.queue+' Queue</button>'+
       '<button class="b" onclick="PV.Detail.edit()">'+I.edit+' Edit</button>'+
       '<button class="b p" onclick="PV.Prints.log(\''+m.id+'\')">'+I.print+' Log print</button>';
+  },
+
+  /* The same overflow, for one file. Named so the row can stay two buttons
+     wide whatever the file turns out to be. */
+  fileMenu(fileId){
+    const f = Store.file(fileId); if(!f) return;
+    const item = (icon, label, action, cls)=>
+      '<button class="b '+(cls||'g')+'" style="width:100%;justify-content:flex-start;margin-bottom:6px" '+
+      'onclick="PV.Modal.back();'+action+'">'+icon+' '+label+'</button>';
+
+    Modal.open(f.name,
+      '<div class="mono" style="font-size:11.5px;color:var(--dim2);word-break:break-all;margin-bottom:10px">'+
+        U.esc(f.path)+'</div>'+
+      (f.kind==='image' ? item(I.img, 'Use as cover', 'PV.Detail.setCover(\''+f.id+'\')') : '')+
+      (FS.canOpenExternally ? item(I.folder, 'Show in folder', 'PV.Detail.revealFile(\''+f.id+'\')') : '')+
+      item(I.dl, 'Save a copy', 'PV.Detail.save(\''+f.id+'\')')+
+      item(I.edit, 'Rename on disk', 'PV.Detail.renameFile(\''+f.id+'\')')+
+      '<hr>'+
+      item(I.trash, 'Delete from disk', 'PV.Detail.deleteFile(\''+f.id+'\')', 'd'),
+      '<div class="sp"></div><button class="b" onclick="PV.Modal.back()">Back</button>');
+  },
+
+  /* The overflow. Each item steps back to the model first, so anything that
+     opens its own dialog sits on top of the model rather than on top of this
+     menu, and cancelling lands you where you started. */
+  more(){
+    const m = Store.model(Detail.cur); if(!m) return;
+    const item = (icon, label, action, hint, cls)=>
+      '<button class="b '+(cls||'g')+'" style="width:100%;justify-content:flex-start;margin-bottom:6px" '+
+      'onclick="PV.Modal.back();'+action+'">'+icon+' '+label+
+      (hint ? '<span class="z" style="margin-left:auto;color:var(--dim2)">'+hint+'</span>' : '')+'</button>';
+
+    Modal.open('More',
+      item(I.link, 'Copy path', 'PV.Detail.copyPath()') +
+      (FS.canOpenExternally ? item(I.folder, 'Open folder', 'PV.Detail.openFolder()') : '') +
+      (m.source ? '<a class="b g" style="width:100%;justify-content:flex-start;margin-bottom:6px" href="'+
+        U.attr(m.source)+'" target="_blank" rel="noopener noreferrer">'+I.ext+' Open source page</a>' : '') +
+      item(I.eyeOff, 'Ignore this folder', 'PV.Detail.exclude()', 'stops indexing it') +
+      '<hr>' +
+      item(I.trash, 'Delete model', 'PV.Detail.deleteModel()',
+           Store.modelFiles(m.id).length + ' files', 'd'),
+      '<div class="sp"></div><button class="b" onclick="PV.Modal.back()">Back</button>');
   },
 
   edit(){
@@ -3385,6 +3539,27 @@ const Detail = {
     }catch(e){ Toast.err('Rename failed: '+e.message); }
   },
 
+  /* Show a file where it actually lives. Reveal rather than open, so the file
+     manager selects it in its folder instead of launching it in whatever app
+     claims the extension. */
+  async revealFile(fileId){
+    const f = Store.file(fileId); if(!f) return;
+    try{ await FS.openExternal(f.rootId, f.path, true); }
+    catch(e){ Toast.err('Could not open the folder: '+(e && e.message || e)); }
+  },
+
+  /* The same thing for the model as a whole. A model that is a folder gets
+     opened, so you land inside it. A loose single file has no folder of its
+     own, so that one gets revealed in its parent instead, which is the same
+     answer to the same question. */
+  async openFolder(){
+    const m = Store.model(Detail.cur); if(!m) return;
+    const files = Store.modelFiles(m.id);
+    const loose = files.length === 1 && files[0].path === m.path;
+    try{ await FS.openExternal(m.rootId, m.path, loose); }
+    catch(e){ Toast.err('Could not open the folder: '+(e && e.message || e)); }
+  },
+
   deleteFile(fileId){
     const f = Store.file(fileId); if(!f) return;
     const r = Store.root(f.rootId);
@@ -3420,6 +3595,48 @@ const Detail = {
     const list = files.slice(0, 8).map(f=>U.esc(f.name)).join('<br>') +
                  (files.length > 8 ? '<br>and ' + (files.length - 8) + ' more' : '');
 
+    /* Permanent and more than a couple of files means typing it out. Moving to
+       quarantine stays a plain confirm, because that one is recoverable and
+       making the safe path as tedious as the unsafe one just teaches people
+       to switch the setting off. */
+    const run = async ()=>{
+      Modal.close();
+      Prog.start((quarantine?'Moving ':'Deleting ') + m.name + '...');
+      const gone = [];
+      let fail = 0;
+      for(let i=0;i<files.length;i++){
+        if(Prog.cancelled) break;
+        const f = files[i];
+        Prog.set((quarantine?'Moving':'Deleting')+' ('+(i+1)+'/'+files.length+') '+f.name, i, files.length);
+        try{
+          if(quarantine) await FS.moveToQuarantine(f.rootId, f.path, qdir);
+          else await FS.deleteFile(f.rootId, f.path);
+          gone.push(f.id);
+        }catch(e){
+          fail++;
+          if(fail === 1) Toast.err((quarantine?'Move':'Delete')+' failed: '+e.message);
+        }
+      }
+      if(!fail && gone.length && m.path && !(files.length === 1 && files[0].path === m.path)){
+        try{ await FS.removeDir(m.rootId, m.path); }catch(e){}
+      }
+      Prog.stop();
+      if(gone.length){
+        Toast.ok((quarantine?'Moved ':'Deleted ')+gone.length+' file'+(gone.length===1?'':'s')+
+                 (fail?', '+fail+' failed':'')+', reindexing');
+        await Scan.run([m.rootId]);
+      }
+    };
+
+    if(!quarantine && files.length >= 3){
+      return Modal.confirmTyped('Delete "'+U.esc(m.name)+'"?',
+        'This permanently removes <b>'+files.length+' files</b>, '+U.bytes(bytes)+
+        ', from disk. There is no Recycle Bin and PrintVault cannot bring them back.'+
+        '<div class="mono" style="margin-top:8px;font-size:11.5px;color:var(--dim2);word-break:break-all">'+
+          U.esc((r&&r.name)||'') + '/' + U.esc(m.path) + '</div>',
+        'DELETE', run, I.trash+' Delete permanently');
+    }
+
     Modal.confirm(
       quarantine ? 'Move this model out?' : 'Delete this model?',
       '<b>' + U.esc(m.name) + '</b><br>' + files.length + ' file' + (files.length===1?'':'s') +
@@ -3432,37 +3649,7 @@ const Detail = {
         ? 'Everything moves to <b>' + U.esc(qdir) + '</b> inside the library, so you can put it back by hand. ' +
           'Change this under Settings if you would rather it deleted outright.'
         : 'There is no recycle bin here, so this cannot be undone.') + '</div>',
-      async ()=>{
-        Modal.close();
-        Prog.start((quarantine?'Moving ':'Deleting ') + m.name + '...');
-        const gone = [];
-        let fail = 0;
-        for(let i=0;i<files.length;i++){
-          if(Prog.cancelled) break;
-          const f = files[i];
-          Prog.set((quarantine?'Moving':'Deleting')+' ('+(i+1)+'/'+files.length+') '+f.name, i, files.length);
-          try{
-            if(quarantine) await FS.moveToQuarantine(f.rootId, f.path, qdir);
-            else await FS.deleteFile(f.rootId, f.path);
-            gone.push(f.id);
-          }catch(e){
-            fail++;
-            if(fail === 1) Toast.err((quarantine?'Move':'Delete')+' failed: '+e.message);
-          }
-        }
-        /* The folder is empty now unless something failed or the model was a
-           loose file. Non-recursive, so if anything is still in there this
-           quietly does nothing, which is the right outcome either way. */
-        if(!fail && gone.length && m.path && !(files.length === 1 && files[0].path === m.path)){
-          try{ await FS.removeDir(m.rootId, m.path); }catch(e){}
-        }
-        Prog.stop();
-        if(gone.length){
-          Toast.ok((quarantine?'Moved ':'Deleted ')+gone.length+' file'+(gone.length===1?'':'s')+
-                   (fail?', '+fail+' failed':'')+', reindexing');
-          await Scan.run([m.rootId]);
-        }
-      },
+      run,
       quarantine ? 'Move out' : 'Delete', true);
   },
 
@@ -4538,6 +4725,139 @@ const TagBox = {
    to an unencrypted box on your network either.
    ============================================================ */
 /* ============================================================
+   Quarantine — what was removed, and the way back
+   ============================================================
+   Removing a duplicate or a whole model moves files here rather than deleting
+   them, and the scanner skips the folder so they never reappear as models.
+   That made it a one way door: the safety net existed but there was no way
+   back up without opening a file manager. This is the ladder.
+
+   The folder mirrors the original paths, so restoring is the same move in
+   reverse and needs no record of where anything came from. */
+const Quarantine = {
+  dir(){ return Store.settings.quarantineDir || '_PrintVault_quarantine'; },
+
+  async list(){
+    const qdir = Quarantine.dir();
+    const out = [];
+    for(const r of Store.roots){
+      let files = [];
+      try{ files = await FS.listDir(r.id, qdir); }catch(e){ continue; }
+      files.forEach(f=>out.push({
+        rootId: r.id, rootName: r.name,
+        // path inside quarantine, which is also where it came from
+        orig: f.path,
+        full: qdir + '/' + f.path,
+        name: f.name, size: f.size, mtime: f.mtime
+      }));
+    }
+    return out.sort((a,b)=>(b.mtime||0)-(a.mtime||0));
+  },
+
+  async open(){
+    Prog.start('Looking in the quarantine folder...');
+    let files = [];
+    try{ files = await Quarantine.list(); }
+    catch(e){ Prog.stop(); return Toast.err('Could not read the quarantine folder: '+(e&&e.message||e)); }
+    Prog.stop();
+    Quarantine.render(files);
+  },
+
+  render(files){
+    const qdir = Quarantine.dir();
+    if(!files.length){
+      return Modal.open('Quarantine',
+        '<div class="note">Nothing in <b>'+U.esc(qdir)+'</b>.</div>'+
+        '<p style="color:var(--dim);font-size:12.5px;line-height:1.6">Files land here when you remove a '+
+        'duplicate or delete a model while the removal setting is on quarantine. They keep their original '+
+        'paths, so anything here can be put back exactly where it came from.</p>',
+        '<div class="sp"></div><button class="b" onclick="PV.Modal.back()">Close</button>');
+    }
+    const total = files.reduce((s,f)=>s+(f.size||0), 0);
+    const rows = files.slice(0, 300).map((f,i)=>
+      '<div class="filerow">'+I.doc+
+        '<span class="n" title="'+U.attr(f.orig)+'">'+U.esc(f.orig)+'</span>'+
+        (Store.roots.length > 1 ? '<span class="z">'+U.esc(f.rootName)+'</span>' : '')+
+        '<span class="z" style="min-width:56px;text-align:right">'+U.bytes(f.size)+'</span>'+
+        '<button class="b g sm ico" title="Put this back" onclick="PV.Quarantine.restoreOne('+i+')">'+I.up+'</button>'+
+      '</div>').join('');
+
+    Quarantine._files = files;
+    Modal.open('Quarantine ('+files.length+')',
+      '<div class="note">These are in <b>'+U.esc(qdir)+'</b>, inside your library. Putting one back returns it '+
+        'to the path it came from.</div>'+
+      '<div class="filelist">'+rows+'</div>'+
+      (files.length > 300 ? '<div style="color:var(--dim2);font-size:12px;padding-top:6px">Showing the newest 300 of '+files.length+'.</div>' : '')+
+      '<p style="color:var(--dim);font-size:12.5px;margin:12px 0 0">Holding <b>'+U.bytes(total)+'</b>.</p>',
+      '<button class="b d" onclick="PV.Quarantine.empty()">'+I.trash+' Empty quarantine</button>'+
+      '<div class="sp"></div>'+
+      '<button class="b" onclick="PV.Modal.back()">Close</button>'+
+      '<button class="b p" onclick="PV.Quarantine.restoreAll()">'+I.up+' Put everything back</button>');
+  },
+
+  async restoreOne(i){
+    const f = (Quarantine._files||[])[i];
+    if(!f) return;
+    try{
+      await FS.move(f.rootId, f.full, f.orig);
+      Toast.ok('Put "'+f.name+'" back');
+      await Scan.run([f.rootId]);
+      Quarantine.open();
+    }catch(e){ Toast.err('Could not put it back: '+(e&&e.message||e)); }
+  },
+
+  async restoreAll(){
+    const files = Quarantine._files || [];
+    if(!files.length) return;
+    Modal.confirm('Put '+files.length+' file'+(files.length===1?'':'s')+' back?',
+      'Each one returns to the path it came from. Anything already sitting at that path is left alone '+
+      'and reported, rather than being written over.',
+      async ()=>{
+        Modal.close();
+        Prog.start('Putting files back...');
+        const roots = new Set();
+        let ok = 0, fail = 0;
+        for(let i=0;i<files.length;i++){
+          if(Prog.cancelled) break;
+          const f = files[i];
+          Prog.set('Restoring ('+(i+1)+'/'+files.length+') '+f.name, i, files.length);
+          try{
+            // Never clobber something that has taken the old path since
+            if(await FS.exists(f.rootId, f.orig)){ fail++; continue; }
+            await FS.move(f.rootId, f.full, f.orig);
+            roots.add(f.rootId); ok++;
+          }catch(e){ fail++; }
+        }
+        Prog.stop();
+        Toast.ok('Put '+ok+' file'+(ok===1?'':'s')+' back'+(fail?', '+fail+' skipped or failed':''));
+        for(const id of roots) await Scan.run([id]);
+      }, 'Put back');
+  },
+
+  empty(){
+    const files = Quarantine._files || [];
+    if(!files.length) return;
+    const total = files.reduce((s,f)=>s+(f.size||0), 0);
+    Modal.confirmTyped('Empty the quarantine folder?',
+      'This permanently deletes <b>'+files.length+' file'+(files.length===1?'':'s')+'</b>, '+U.bytes(total)+
+      '. This is the copy you kept in case you wanted it back, so once this is done there is no way back.',
+      'DELETE',
+      async ()=>{
+        Prog.start('Emptying quarantine...');
+        let ok = 0, fail = 0;
+        for(let i=0;i<files.length;i++){
+          if(Prog.cancelled) break;
+          Prog.set('Deleting ('+(i+1)+'/'+files.length+')', i, files.length);
+          try{ await FS.deleteFile(files[i].rootId, files[i].full); ok++; }catch(e){ fail++; }
+        }
+        Prog.stop();
+        Toast.ok('Deleted '+ok+' file'+(ok===1?'':'s')+(fail?', '+fail+' failed':''));
+        Quarantine.open();
+      }, I.trash+' Delete permanently');
+  }
+};
+
+/* ============================================================
    Share — hand files to the system share sheet (macOS)
    ============================================================
    Asked for by someone who keeps getting "can you send me that thing you
@@ -5551,8 +5871,19 @@ const Dupes = {
       '</div><p style="color:var(--dim);font-size:12.5px;margin:12px 0 0">Frees about <b>'+U.bytes(total)+'</b>.</p>',
       '<button class="b" onclick="PV.Modal.back()">Cancel</button>'+
       '<button class="b d" id="dYes">'+I.trash+' Delete permanently</button>');
-    document.getElementById('dYes').onclick = ()=>Dupes._run(files);
+    /* Past a handful of files this stops being a click you can take back by
+       noticing quickly, so make it a sentence you have to mean. */
+    document.getElementById('dYes').onclick = ()=>{
+      if(files.length < Dupes.TYPED_AT) return Dupes._run(files);
+      Modal.confirmTyped('Delete '+files.length+' files?',
+        'This removes <b>'+files.length+' files</b> and about <b>'+U.bytes(total)+'</b> from disk. '+
+        'They do not go to the Recycle Bin and PrintVault cannot bring them back.',
+        'DELETE', ()=>Dupes._run(files), I.trash+' Delete permanently');
+    };
   },
+
+  // above this many files, a permanent delete asks you to type it out
+  TYPED_AT: 10,
   async _run(files, quarantine){
     Modal.close();
     const qdir = Store.settings.quarantineDir || '_PrintVault_quarantine';
@@ -5773,18 +6104,22 @@ const Settings = {
         '<div class="hint">Folders starting with a dot are always skipped.</div></div>'+
       '</div>';
 
-    h += '<div class="panel"><h3>'+I.copy+' Duplicate cleanup</h3>'+
-      '<div class="f"><label>What happens to the copies you pick</label>'+
+    h += '<div class="panel"><h3>'+I.copy+' Removing files</h3>'+
+      '<div class="f"><label>What happens to files you remove</label>'+
         '<select id="sDupe" onchange="PV.Settings.set(\'dupeAction\',this.value)">'+
           '<option value="quarantine"'+(s.dupeAction!=='delete'?' selected':'')+'>Move to a quarantine folder (reversible)</option>'+
           '<option value="delete"'+(s.dupeAction==='delete'?' selected':'')+'>Delete permanently (no undo)</option>'+
         '</select>'+
-        '<div class="hint">Deleting from a web page bypasses the Recycle Bin, so there is no way back. '+
-        'Quarantine moves files instead, keeping their original path inside the folder below.</div></div>'+
+        '<div class="hint">Applies to duplicate cleanup and to deleting a whole model. '+
+        'Deleting bypasses the Recycle Bin, so there is no way back. Quarantine moves files instead, '+
+        'keeping their original path inside the folder below. Deleting a single file from the model '+
+        'view is always permanent.</div></div>'+
       '<div class="fr">'+
         '<div class="f"><label>Quarantine folder name</label><input id="sQDir" value="'+U.attr(s.quarantineDir)+'" '+
           'onchange="PV.Settings.set(\'quarantineDir\',this.value.trim()||\'_PrintVault_quarantine\')">'+
-          '<div class="hint">Created inside each indexed folder. Always skipped by scans.</div></div>'+
+          '<div class="hint">Created inside each indexed folder. Always skipped by scans, '+
+          'which is why it needs its own window to look inside.</div>'+
+          '<button class="b sm" style="margin-top:8px" onclick="PV.Quarantine.open()">'+I.copy+' Show what is in quarantine</button></div>'+
         '<div class="f"><label>Prefer to keep files under</label><input id="sPrefer" value="'+U.attr(s.keepPrefer)+'" '+
           'onchange="PV.Settings.set(\'keepPrefer\',this.value.trim())" placeholder="Figurines/">'+
           '<div class="hint">Optional path prefix. When copies tie, the one here is kept. '+
@@ -6578,7 +6913,7 @@ const Demo = {
   requestAnimationFrame(()=>UI.renderSide());
 })();
 
-window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
+window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, Quarantine, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
   UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, APP_VERSION};
 
 
