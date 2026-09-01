@@ -2309,13 +2309,34 @@ const Scan = {
 
     if(skippedByExclude) console.info('[PrintVault] '+skippedByExclude+' files skipped by exclusions in "'+root.name+'"');
 
-    if(stats.badDirs.length){
+    /* A failure to list the top level is not "some folders were skipped", it
+       means the handle the browser gave us no longer resolves to anything.
+       That happens when the directory is replaced underneath us, which cloud
+       sync clients do routinely, and permission stays granted throughout so
+       the usual permission message is wrong too. Nothing can re-resolve it
+       without a click, so say that rather than implying the files are gone. */
+    const rootDead = stats.badDirs.some(d=>d.path === '(top level)');
+    if(rootDead){
+      console.warn('[PrintVault] root handle no longer resolves for "'+root.name+'":', stats.badDirs[0]);
+      Toast.err('Lost the connection to "'+root.name+'". The folder is almost certainly still there, but '+
+        'the browser\'s handle to it stopped working, which cloud sync folders like OneDrive and iCloud '+
+        'cause when they replace a directory. Add the folder again to reconnect. Your tags, notes and '+
+        'print history are kept.', 9000);
+      /* Stop here, and this is the important part. An unreadable folder looks
+         exactly like an empty one to everything downstream, so carrying on
+         would decide every file had been deleted and strip the whole index:
+         tags, notes, collections and the links print history hangs off. The
+         files on disk are fine, and the index has to survive with them. */
+      return;
+    } else if(stats.badDirs.length){
       console.warn('[PrintVault] unreadable folders in "'+root.name+'":', stats.badDirs);
       Toast.err(stats.badDirs.length+' folder'+(stats.badDirs.length===1?'':'s')+' in "'+root.name+
         '" could not be listed and were skipped, starting with "'+stats.badDirs[0].path+'" ('+
         stats.badDirs[0].error+'). Network drives can drop out mid-scan. See the console for the full list.');
     }
-    if(!found.length){
+    // Already explained above if the root itself died; saying it twice, and
+    // in terms that suggest an empty folder, only muddies it.
+    if(!found.length && !rootDead){
       Toast.err('No usable files found in "'+root.name+'". '+
         (stats.total ? 'It holds '+stats.total+' files but none are model, gcode, image or archive types.'
                      : 'The folder read as empty, which on a network drive usually means it is no longer reachable.'));
@@ -4798,12 +4819,26 @@ const Quarantine = {
   async restoreOne(i){
     const f = (Quarantine._files||[])[i];
     if(!f) return;
+
+    /* Only the move itself may report a failed restore. Everything after it
+       is bookkeeping, and the file is already back by then, so reporting a
+       rescan failure as "could not put it back" sends people hunting for a
+       file that is sitting exactly where they asked for it. */
     try{
+      // Same guard restoreAll has. Without it, restoring over something that
+      // took the old path in the meantime would overwrite it without a word.
+      if(await FS.exists(f.rootId, f.orig)){
+        return Toast.err('Something is already at that path, left it alone');
+      }
       await FS.move(f.rootId, f.full, f.orig);
-      Toast.ok('Put "'+f.name+'" back');
-      await Scan.run([f.rootId]);
-      Quarantine.open();
-    }catch(e){ Toast.err('Could not put it back: '+(e&&e.message||e)); }
+    }catch(e){
+      return Toast.err('Could not put it back: '+(e && e.message || e));
+    }
+
+    Toast.ok('Put "'+f.name+'" back');
+    try{ await Scan.run([f.rootId]); }
+    catch(e){ Toast.err('It is back, but the rescan failed: '+(e && e.message || e)); }
+    try{ await Quarantine.open(); }catch(e){}
   },
 
   async restoreAll(){
@@ -4830,7 +4865,10 @@ const Quarantine = {
         }
         Prog.stop();
         Toast.ok('Put '+ok+' file'+(ok===1?'':'s')+' back'+(fail?', '+fail+' skipped or failed':''));
-        for(const id of roots) await Scan.run([id]);
+        // The files are already back; a rescan that fails must not read as one
+        // that did not happen.
+        try{ for(const id of roots) await Scan.run([id]); }
+        catch(e){ Toast.err('They are back, but the rescan failed: '+(e && e.message || e)); }
       }, 'Put back');
   },
 
@@ -4852,7 +4890,7 @@ const Quarantine = {
         }
         Prog.stop();
         Toast.ok('Deleted '+ok+' file'+(ok===1?'':'s')+(fail?', '+fail+' failed':''));
-        Quarantine.open();
+        try{ await Quarantine.open(); }catch(e){}
       }, I.trash+' Delete permanently');
   }
 };
