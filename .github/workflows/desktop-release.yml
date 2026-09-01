@@ -56,6 +56,21 @@ jobs:
     needs: release
     strategy:
       fail-fast: false
+      # One at a time, deliberately, and it costs about twenty minutes.
+      #
+      # Every runner appends its platforms to the same latest.json on the
+      # release: read it, merge, upload it back. Run in parallel that is three
+      # processes racing on one file, and the loser's entries simply are not
+      # there afterwards. It bit 0.2.25: macOS lost the race, the job reported
+      # "Not Found - update-a-release-asset", and the manifest came out with
+      # seven platforms instead of eleven. Every installer was present and
+      # correct, so the only visible symptom would have been Macs never being
+      # offered the update.
+      #
+      # Serialising is the boring fix. The alternative, letting them race and
+      # rebuilding the manifest afterwards from the .sig files, is faster and
+      # has more places to be wrong.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest # Apple Silicon; builds a universal binary
@@ -157,6 +172,34 @@ jobs:
           # cannot be "simplified" into a gh api call.
           mkdir -p dist-check && cd dist-check
           gh release download "$tag" --repo "$GITHUB_REPOSITORY"
+
+          # The updater manifest has to name every platform we just built. A
+          # partial one is the failure mode with no symptoms: the installers
+          # are all present, the release looks finished, and the platform that
+          # went missing simply never gets offered an update again. Serialising
+          # the builds should prevent it; this is here so that if it happens
+          # anyway the release fails loudly instead of shipping.
+          echo "----- checking latest.json covers every platform -----"
+          node -e '
+            const m = require("./latest.json");
+            const keys = Object.keys(m.platforms || {});
+            console.log("version:", m.version);
+            console.log("platforms:", keys.join(", ") || "(none)");
+            const missing = ["darwin", "linux", "windows"].filter(
+              os => !keys.some(k => k.startsWith(os))
+            );
+            const unsigned = keys.filter(k => !m.platforms[k].signature);
+            if (missing.length) {
+              console.error("MISSING from the update manifest: " + missing.join(", "));
+              console.error("A build lost the race writing latest.json. Re-run that job.");
+              process.exit(1);
+            }
+            if (unsigned.length) {
+              console.error("Unsigned entries: " + unsigned.join(", "));
+              process.exit(1);
+            }
+            console.log("all three platforms present and signed");
+          '
 
           # Hash what a person actually downloads and runs. The .sig files are
           # the updater's signatures and latest.json is its manifest; neither is
