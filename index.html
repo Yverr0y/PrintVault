@@ -476,6 +476,12 @@ const U = {
      inside the library. Everything the app stores uses forward slashes, but a
      native file picker hands back whatever the platform uses, and on Windows
      that is backslashes, which base() would not split on at all. */
+  /* Which modifier key to name in hints. userAgentData where it exists,
+     platform as the fallback, and Windows wording if neither answers. */
+  isMac(){
+    const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    return /mac/i.test(p);
+  },
   osBase(path){ return String(path||'').replace(/[\\/]+$/,'').split(/[\\/]/).pop() || String(path||''); },
   dir(path){ const i=path.lastIndexOf('/'); return i<0?'':path.slice(0,i); },
   stem(name){ const i=name.lastIndexOf('.'); return i<0?name:name.slice(0,i); },
@@ -637,7 +643,7 @@ const DB = {
 const Store = {
   roots:[], models:[], files:[], prints:[], filaments:[], printers:[], queue:[], parked:[],
   settings:{
-    theme:'dark', accent:'orange', view:'grid', sort:'name', dir:'asc', sidebar:true,
+    theme:'dark', accent:'orange', learnedSelect:false, view:'grid', sort:'name', dir:'asc', sidebar:true,
     hashOnScan:false, thumbOnScan:true, thumbSize:320, currency:'$',
     skipDirs:'node_modules,.git,.svn,$RECYCLE.BIN,System Volume Information,.thumbnails',
     defaultPrinter:'', costPerHour:0.15, lastScan:0,
@@ -849,6 +855,8 @@ document.addEventListener('keydown', e=>{
     e.preventDefault(); Viewer.step(e.key==='ArrowRight' ? 1 : -1);
   }
   else if(e.key==='/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){ e.preventDefault(); document.getElementById('q').focus(); }
+  else if(e.key==='?' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)
+          && !document.getElementById('ovl').classList.contains('on')){ e.preventDefault(); Keys.open(); }
 
   /* Arrow keys around the grid, Enter to open. The cards are
      real focusable elements rather than an index kept in a variable, so the
@@ -3053,6 +3061,13 @@ const Library = {
       '<h2>'+(f.tag ? U.esc(f.tag) : f.coll ? U.esc(f.coll) : f.rootId ? U.esc((Store.root(f.rootId)||{}).name) : 'All Models')+'</h2>'+
       '<span class="cnt">'+all.length.toLocaleString()+(all.length===1?' model':' models')+'</span>'+
       '<div class="sp"></div>'+
+      /* Someone who reads carefully and files good bug reports still did not
+         know several models could be selected at once, because nothing has
+         ever said so. Shown until the first time you do it, then gone for
+         good, so it teaches without becoming furniture. */
+      (!Library.sel.size && all.length > 1 && !s.learnedSelect
+        ? '<span class="z" style="color:var(--dim2)">'+
+          (U.isMac() ? '⌘' : 'Ctrl')+'-click to pick several</span>' : '')+
       (Library.sel.size ? '<button class="b sm p" onclick="PV.Library.bulk()">'+I.tag+' Edit '+Library.sel.size+' selected</button>' : '')+
       (Library.sel.size && FS.canShare
         ? '<button class="b sm" onclick="PV.Share.open(Array.from(PV.Library.sel))">'+I.share+' Share</button>' : '')+
@@ -3161,6 +3176,8 @@ const Library = {
   click(e, id){
     if(e.ctrlKey || e.metaKey || e.shiftKey){
       Library.sel.has(id) ? Library.sel.delete(id) : Library.sel.add(id);
+      // You have found it, so stop being told about it.
+      if(!Store.settings.learnedSelect) Store.setting('learnedSelect', true);
       UI.render(); return;
     }
     Detail.open(id);
@@ -6322,7 +6339,10 @@ const Settings = {
           }).join('')+
         '</div>'+
         '<div class="hint">Interface only. Model previews stay orange, because they are drawn once and kept.</div>'+
-      '</div></div>';
+      '</div>'+
+      '<div style="margin-top:14px"><button class="b" onclick="PV.Keys.open()">'+I.list+' Keyboard shortcuts</button>'+
+        '<div class="hint">Or press <kbd>?</kbd> anywhere.</div></div>'+
+      '</div>';
 
     const ab = (s.autoBackups || []).slice(-1)[0];
     const last = ab ? ab.name + '  (' + U.bytes(ab.bytes || 0) + ')' : '';
@@ -7147,6 +7167,29 @@ const Demo = {
    that only works online would be the one part of it that does not work on a
    machine with no internet. Newest first, and deliberately terser than the
    release notes: this is a reminder, not documentation. */
+/* The app has grown keys nothing announces. ? is the usual way to ask, and
+   Settings lists them too for anyone who would never think to press it. */
+const Keys = {
+  rows: [
+    ['/', 'Jump to the search box'],
+    ['Arrow keys', 'Move around the library'],
+    ['Enter', 'Open the model you are on'],
+    ['Home / End', 'First or last model'],
+    ['Click', 'Open a model'],
+    ['MOD-click', 'Add a model to the selection, or take it out'],
+    ['← / →', 'Previous or next part, in the 3D view'],
+    ['Esc', 'Close whatever is open'],
+    ['?', 'This list']
+  ],
+  open(){
+    const mod = U.isMac() ? '⌘' : 'Ctrl';
+    Modal.open('Keyboard',
+      '<dl class="kv">'+Keys.rows.map(([k,d])=>
+        '<dt style="white-space:nowrap"><kbd>'+U.esc(k.replace('MOD', mod))+'</kbd></dt><dd>'+U.esc(d)+'</dd>').join('')+'</dl>',
+      '<div class="sp"></div><button class="b p" onclick="PV.Modal.back()">Close</button>');
+  }
+};
+
 const WhatsNew = {
   notes: [
     ['0.2.25', [
@@ -7247,7 +7290,7 @@ const WhatsNew = {
 })();
 
 window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, Quarantine, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
-  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, SliceWatch, APP_VERSION};
+  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, Keys, SliceWatch, APP_VERSION};
 
 
 })();
