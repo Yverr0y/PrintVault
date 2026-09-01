@@ -637,7 +637,7 @@ const DB = {
 const Store = {
   roots:[], models:[], files:[], prints:[], filaments:[], printers:[], queue:[], parked:[],
   settings:{
-    theme:'dark', view:'grid', sort:'name', dir:'asc', sidebar:true,
+    theme:'dark', accent:'orange', view:'grid', sort:'name', dir:'asc', sidebar:true,
     hashOnScan:false, thumbOnScan:true, thumbSize:320, currency:'$',
     skipDirs:'node_modules,.git,.svn,$RECYCLE.BIN,System Volume Information,.thumbnails',
     defaultPrinter:'', costPerHour:0.15, lastScan:0,
@@ -6309,7 +6309,20 @@ const Settings = {
     h += '<div class="panel"><h3>'+I.sun+' Appearance</h3>'+
       '<div class="seg" style="width:fit-content">'+
         ['dark','light'].map(t=>'<button class="'+(s.theme===t?'on':'')+'" onclick="PV.Settings.theme(\''+t+'\')">'+
-          (t==='dark'?I.moon:I.sun)+' '+t[0].toUpperCase()+t.slice(1)+'</button>').join('')+'</div></div>';
+          (t==='dark'?I.moon:I.sun)+' '+t[0].toUpperCase()+t.slice(1)+'</button>').join('')+'</div>'+
+      '<div style="margin-top:12px"><label style="display:block;font-size:12.5px;color:var(--dim);margin-bottom:7px">Accent</label>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+          ACCENTS.map(a=>{
+            const on = (s.accent||'orange') === a.id;
+            const swatch = s.theme === 'light' ? a.light : a.dark;
+            return '<button title="'+U.attr(a.name)+'" aria-label="'+U.attr(a.name)+'" '+
+              'onclick="PV.Settings.accent(\''+a.id+'\')" '+
+              'style="width:30px;height:30px;border-radius:50%;cursor:pointer;background:'+swatch+';'+
+              'border:2px solid '+(on ? 'var(--txt)' : 'transparent')+';outline:1px solid var(--line)"></button>';
+          }).join('')+
+        '</div>'+
+        '<div class="hint">Interface only. Model previews stay orange, because they are drawn once and kept.</div>'+
+      '</div></div>';
 
     const ab = (s.autoBackups || []).slice(-1)[0];
     const last = ab ? ab.name + '  (' + U.bytes(ab.bytes || 0) + ')' : '';
@@ -6367,6 +6380,7 @@ const Settings = {
 
   set(k, val){ Store.setting(k, val); if(k==='thumbSize') Toast.ok('New previews will use '+val+'px'); },
   theme(t){ Store.setting('theme', t); applyTheme(); UI.render(); },
+  accent(a){ Store.setting('accent', a); applyTheme(); UI.render(); },
 
   printer(id){
     const p = id ? Store.printer(id) : null;
@@ -6637,9 +6651,48 @@ const Settings = {
 /* ============================================================
    Boot
    ============================================================ */
+/* Accent colours. Each needs its own pair because a hue bright enough to read
+   on the dark theme is usually too pale on the light one, so they are picked
+   rather than derived from a single value.
+
+   Only the interface follows this. The 3D previews stay orange deliberately:
+   they are rendered once and cached, so tying them to the accent would leave a
+   whole library the wrong colour until every thumbnail was drawn again. */
+const ACCENTS = [
+  {id:'orange', name:'Orange', dark:'#ff8a3d', light:'#e06a15'},
+  {id:'blue',   name:'Blue',   dark:'#4da3ff', light:'#0b63c4'},
+  {id:'green',  name:'Green',  dark:'#3ddc97', light:'#0e8f5d'},
+  {id:'purple', name:'Purple', dark:'#a684ff', light:'#6b3fd4'},
+  {id:'pink',   name:'Pink',   dark:'#ff7ab0', light:'#c4266f'},
+  {id:'amber',  name:'Amber',  dark:'#ffc857', light:'#9a6b00'}
+];
+
+function accentVars(hex, light){
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+  const d = c=>Math.round(c*0.78);
+  return {
+    acc: hex,
+    accd: '#'+[d(r),d(g),d(b)].map(c=>c.toString(16).padStart(2,'0')).join(''),
+    soft: 'rgba('+r+','+g+','+b+','+(light ? '.1' : '.13')+')'
+  };
+}
+
 function applyTheme(){
-  document.documentElement.setAttribute('data-theme', Store.settings.theme || 'dark');
-  document.getElementById('btnTheme').innerHTML = Store.settings.theme === 'light' ? I.moon : I.sun;
+  const light = Store.settings.theme === 'light';
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+  document.getElementById('btnTheme').innerHTML = light ? I.moon : I.sun;
+
+  const a = ACCENTS.find(x=>x.id === Store.settings.accent) || ACCENTS[0];
+  const v = accentVars(light ? a.light : a.dark, light);
+  const st = document.documentElement.style;
+  // Set on the element so it beats the stylesheet's :root and [data-theme]
+  // rules without either of them needing to know these exist.
+  st.setProperty('--acc', v.acc);
+  st.setProperty('--accd', v.accd);
+  st.setProperty('--acc-soft', v.soft);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute('content', light ? '#f6f7f9' : '#0e1014');
 }
 
 function wire(){
