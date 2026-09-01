@@ -396,7 +396,8 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
       <svg viewBox="0 0 32 32" fill="none"><path d="M16 2 3 9v14l13 7 13-7V9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".45"/><path d="M3 9l13 6.6L29 9M16 15.6V30" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".45"/><path d="M16 2 3 9l13 6.6L29 9z" fill="var(--acc)" opacity=".9"/></svg>
       <span>Print<i>Vault</i></span>
     </div>
-    <span class="pv-ver" id="verTag">v0</span>
+    <span class="pv-ver" id="verTag" role="button" tabindex="0" title="What changed in this version"
+      style="cursor:pointer" onclick="PV.WhatsNew.open()">v0</span>
     <div class="pv-search">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9" r="6"/><path d="M13.5 13.5 18 18"/></svg>
       <input id="q" type="search" placeholder="Search models, tags, files, creators..." autocomplete="off" spellcheck="false">
@@ -636,7 +637,8 @@ const Store = {
     skipDirs:'node_modules,.git,.svn,$RECYCLE.BIN,System Volume Information,.thumbnails',
     defaultPrinter:'', costPerHour:0.15, lastScan:0,
     dupeAction:'quarantine', quarantineDir:'_PrintVault_quarantine', keepPrefer:'',
-    autoBackup:'weekly', autoBackupAt:0, autoBackupSig:'', autoBackups:[]
+    autoBackup:'weekly', autoBackupAt:0, autoBackupSig:'', autoBackups:[],
+    lastSeenVersion:''
   },
   _subs:[],
   _idx:{ models:new Map(), files:new Map() },
@@ -6914,6 +6916,68 @@ const Demo = {
   }
 };
 
+/* ============================================================
+   WhatsNew — what changed, in the app
+   ============================================================
+   Written here rather than fetched from the releases API. The app makes no
+   network calls at all and the CSP has nowhere to fetch from, and a changelog
+   that only works online would be the one part of it that does not work on a
+   machine with no internet. Newest first, and deliberately terser than the
+   release notes: this is a reminder, not documentation. */
+const WhatsNew = {
+  notes: [
+    ['0.2.25', [
+      'Deleting a whole model, instead of one file at a time.',
+      'A quarantine view in Settings, so anything removed can be put back.',
+      'A scan can no longer empty your index when a folder stops responding.',
+      'Permanently deleting several files now asks you to type it out.',
+      'Fewer buttons on the model screen, and arrow keys move around the library.'
+    ]],
+    ['0.2.23', [
+      'Open in slicer works on macOS. It had been failing with a permissions error.',
+      'Delete a whole model in one go.'
+    ]],
+    ['0.2.22', [
+      'Share models to the macOS share sheet, including several at once.'
+    ]],
+    ['0.2.21', [
+      'The sidebar no longer traps itself open on a phone.'
+    ]],
+    ['0.2.20', [
+      'A demo library, at /app/?demo, for looking around before pointing it at your files.'
+    ]]
+  ],
+
+  open(){
+    const h = WhatsNew.notes.map(([ver, items], i)=>
+      '<div style="margin-bottom:'+(i === WhatsNew.notes.length-1 ? '0' : '18px')+'">'+
+        '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'+
+          '<b style="font-size:13.5px">'+U.esc(ver)+'</b>'+
+          (ver === APP_VERSION ? '<span class="bdg acc">you have this</span>' : '')+
+        '</div>'+
+        '<ul style="margin:0;padding-left:18px;color:var(--dim);font-size:12.5px;line-height:1.7">'+
+          items.map(t=>'<li>'+U.esc(t)+'</li>').join('')+
+        '</ul>'+
+      '</div>').join('');
+
+    Modal.open('What changed',
+      h + '<p style="color:var(--dim2);font-size:12px;margin:16px 0 0">'+
+        'Older releases, and the longer version of all of this, are on '+
+        '<a href="https://github.com/magikh0e/PrintVault/releases" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>',
+      '<div class="sp"></div><button class="b p" onclick="PV.Modal.back()">Close</button>');
+  },
+
+  /* Show it once after an update. Not on a first run: somebody who has never
+     opened the app before does not need telling what changed in it. */
+  async maybe(){
+    const seen = Store.settings.lastSeenVersion;
+    if(seen === APP_VERSION) return;
+    const firstEver = !seen && !Store.roots.length;
+    await Store.setting('lastSeenVersion', APP_VERSION);
+    if(!firstEver) WhatsNew.open();
+  }
+};
+
 (async function boot(){
   // The engine is worth showing at a glance: it decides whether folder access
   // is native or goes through the browser, which is the first thing to ask
@@ -6939,7 +7003,7 @@ const Demo = {
   // None of these make sense against invented data: there are no folder
   // permissions to check, no printer to poll and nowhere to write a backup.
   if(Demo.on){ Demo.banner(); Demo.guard(); }
-  else { checkPerms(); Monitor.start(); AutoBackup.run(); }
+  else { checkPerms(); Monitor.start(); AutoBackup.run(); WhatsNew.maybe(); }
   if(!Demo.on && (!FS.supported || !FS.secure)){
     document.getElementById('btnAddRoot').classList.add('hidden');
     document.getElementById('btnScan').classList.add('hidden');
@@ -6952,7 +7016,7 @@ const Demo = {
 })();
 
 window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, Quarantine, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
-  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, APP_VERSION};
+  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, APP_VERSION};
 
 
 })();
