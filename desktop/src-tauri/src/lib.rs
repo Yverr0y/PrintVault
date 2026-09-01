@@ -800,14 +800,35 @@ static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 /// Runs on a worker thread, so `blocking_show` is safe here. On the main
 /// thread it would deadlock GTK, the same way the folder picker did.
 async fn check_for_update(app: tauri::AppHandle) {
-    let updater = match app.updater() {
-        Ok(u) => u,
-        Err(_) => return,
+    // Startup check. Nothing to say when there is no update, but a failure is
+    // worth recording: see pv_check_update for why silence is the problem.
+    match run_update_check(&app).await {
+        Ok(Some(_)) | Ok(None) => {}
+        Err(e) => eprintln!("[PrintVault] update check failed: {}", e),
+    }
+}
+
+/// Ask the endpoint what it has, and offer it if it is newer.
+///
+/// Returns the version offered, or None when already current. Every failure
+/// comes back as an Err with a reason rather than being swallowed, because a
+/// silent updater is indistinguishable from a working one that has nothing to
+/// do, and this is the mechanism every future fix arrives through.
+async fn run_update_check(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    let updater = app
+        .updater()
+        .map_err(|e| format!("updater unavailable: {}", e))?;
+
+    let found = updater
+        .check()
+        .await
+        .map_err(|e| format!("could not reach the update endpoint: {}", e))?;
+
+    let update = match found {
+        Some(u) => u,
+        None => return Ok(None),
     };
-    let update = match updater.check().await {
-        Ok(Some(u)) => u,
-        _ => return,
-    };
+    let offered = update.version.clone();
 
     let msg = format!(
         "PrintVault {} is available (you have {}). Install it and restart now?
@@ -825,9 +846,25 @@ Your library and index are untouched.",
         ))
         .blocking_show();
 
-    if accepted && update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+    if accepted {
+        update
+            .download_and_install(|_, _| {}, || {})
+            .await
+            .map_err(|e| format!("download or install failed: {}", e))?;
         app.restart();
     }
+    Ok(Some(offered))
+}
+
+/// The same check, asked for on purpose from Settings.
+///
+/// The startup check runs once and says nothing when it fails, so there was no
+/// way to tell a broken updater from an up to date one. This one always
+/// answers: the version it offered, that you are current, or why it could not
+/// find out.
+#[tauri::command]
+async fn pv_check_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    run_update_check(&app).await
 }
 
 pub fn run() {
@@ -865,6 +902,7 @@ pub fn run() {
             pv_extract,
             pv_share,
             pv_remove_dir,
+            pv_check_update,
             pv_root_ok
         ])
         .setup(|app| {

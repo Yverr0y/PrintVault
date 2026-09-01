@@ -6294,6 +6294,18 @@ const Settings = {
        : '<div style="color:var(--dim2);font-size:12.5px;margin-bottom:10px">No printers added. Optional, but handy for autocomplete when logging prints.</div>')+
       '<button class="b" style="margin-top:10px" onclick="PV.Settings.printer()">'+I.plus+' Add printer</button></div>';
 
+    /* Desktop only: the browser build has no updater, it is whatever the
+       server last sent. */
+    if(FS.kind === 'desktop'){
+      h += '<div class="panel"><h3>'+I.up+' Updates</h3>'+
+        '<p class="muted">This build is <b>v'+U.esc(APP_VERSION)+'</b>. It looks for a new one when it starts, '+
+        'which means a copy left open for days will not notice. Ask it here any time.</p>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<button class="b" id="btnUpd" onclick="PV.Settings.checkUpdate()">'+I.refresh+' Check for updates</button>'+
+          '<span id="updMsg" style="color:var(--dim2);font-size:12.5px"></span>'+
+        '</div></div>';
+    }
+
     h += '<div class="panel"><h3>'+I.sun+' Appearance</h3>'+
       '<div class="seg" style="width:fit-content">'+
         ['dark','light'].map(t=>'<button class="'+(s.theme===t?'on':'')+'" onclick="PV.Settings.theme(\''+t+'\')">'+
@@ -6403,6 +6415,29 @@ const Settings = {
     }catch(e){
       if(el){ el.style.color = 'var(--bad)'; el.textContent = (e.message || e); }
     }
+  },
+
+  /* Always answers. The startup check says nothing whether it succeeded, found
+     nothing, or failed outright, which made a broken updater look exactly like
+     an up to date one. */
+  async checkUpdate(){
+    const btn = document.getElementById('btnUpd'), msg = document.getElementById('updMsg');
+    if(!btn) return;
+    btn.disabled = true;
+    if(msg){ msg.style.color = 'var(--dim2)'; msg.textContent = 'Asking GitHub...'; }
+    try{
+      const found = await FS._call('pv_check_update');
+      if(msg){
+        if(found){ msg.style.color = 'var(--ok)'; msg.textContent = found + ' is available.'; }
+        else { msg.textContent = 'You have the newest version.'; }
+      }
+    }catch(e){
+      // The whole point: say what went wrong rather than looking identical to
+      // having nothing to do.
+      const t = String(e && e.message || e);
+      if(msg){ msg.style.color = 'var(--bad)'; msg.textContent = t; }
+      Toast.err('Update check failed: '+t);
+    }finally{ btn.disabled = false; }
   },
 
   async pickSlicer(){
