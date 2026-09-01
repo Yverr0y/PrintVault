@@ -4765,6 +4765,65 @@ const TagBox = {
    to an unencrypted box on your network either.
    ============================================================ */
 /* ============================================================
+   SliceWatch — notice the gcode when it lands
+   ============================================================
+   Slicing from inside the app turned out not to be worth having. OrcaSlicer's
+   Windows build boots its whole interface when handed command line arguments
+   and never slices headlessly, and it only writes errors to a console it
+   inherits directly, so anything driving it cannot even report why it failed.
+
+   This does the useful half instead. When you send a model to a slicer, the
+   folder it lives in is noted along with the gcode already in it. Come back to
+   the window later and PrintVault looks once more: if gcode has appeared, it
+   scans and tells you. No process spawning, no profiles, and it works with
+   every slicer rather than one. */
+const SliceWatch = {
+  _pending: null,
+  // Nobody slices for four hours and comes back expecting this. Past that it
+  // is stale, and rescanning on a stranger's schedule is just surprising.
+  MAX_AGE: 4 * 60 * 60 * 1000,
+
+  async expect(file){
+    const m = Store.model(file.modelId);
+    const folder = m ? (U.dir(m.path) === '' && m.path ? m.path : (U.dir(file.path) || '')) : U.dir(file.path);
+    let before = [];
+    try{ before = (await FS.listDir(file.rootId, folder)).filter(f=>SliceWatch.isGcode(f.name)).map(f=>f.name); }
+    catch(e){ /* cannot list it now, so nothing to compare against later */ return; }
+    SliceWatch._pending = {
+      rootId: file.rootId, folder, modelId: file.modelId,
+      modelName: m ? m.name : file.name,
+      before, at: Date.now()
+    };
+  },
+
+  isGcode(name){ return /\.(gcode|gco|g|bgcode|ufp|gx|mgcode)(\.3mf)?$/i.test(String(name||'')); },
+
+  /* Called when the window gets focus back. Cheap: it lists one folder, and
+     only pays for a scan when something actually turned up. */
+  async check(){
+    const p = SliceWatch._pending;
+    if(!p) return;
+    if(Date.now() - p.at > SliceWatch.MAX_AGE){ SliceWatch._pending = null; return; }
+    if(Scan.busy) return;
+
+    let now = [];
+    try{ now = (await FS.listDir(p.rootId, p.folder)).filter(f=>SliceWatch.isGcode(f.name)).map(f=>f.name); }
+    catch(e){ return; }                       // folder gone or unreadable, leave it alone
+
+    const seen = new Set(p.before);
+    const fresh = now.filter(n=>!seen.has(n));
+    if(!fresh.length) return;
+
+    // Only look once. Finding it again on every focus would be nagging.
+    SliceWatch._pending = null;
+    Toast.ok(fresh.length === 1
+      ? 'New gcode for "'+p.modelName+'", indexing it'
+      : fresh.length+' new gcode files for "'+p.modelName+'", indexing them');
+    await Scan.run([p.rootId]);
+  }
+};
+
+/* ============================================================
    Quarantine — what was removed, and the way back
    ============================================================
    Removing a duplicate or a whole model moves files here rather than deleting
@@ -5041,6 +5100,9 @@ const Send = {
       await FS.openWith(f.rootId, f.path, exe);
       Modal.close();
       Toast.ok(sl ? 'Opening '+f.name+' in '+sl.name : 'Opening '+f.name);
+      // You went to slice something. Remember where, so the gcode can be
+      // noticed when it lands rather than waiting for the next full scan.
+      SliceWatch.expect(f);
     }catch(e){ Toast.err(e.message || String(e)); }
   },
 
@@ -7076,7 +7138,15 @@ const WhatsNew = {
   // None of these make sense against invented data: there are no folder
   // permissions to check, no printer to poll and nowhere to write a backup.
   if(Demo.on){ Demo.banner(); Demo.guard(); }
-  else { checkPerms(); Monitor.start(); AutoBackup.run(); WhatsNew.maybe(); }
+  else {
+    checkPerms(); Monitor.start(); AutoBackup.run(); WhatsNew.maybe();
+    /* Coming back to the window is the moment you have finished slicing, so
+       that is when to look. Both events, because a desktop window regaining
+       focus does not always fire visibilitychange and a background browser tab
+       does not always fire focus. */
+    window.addEventListener('focus', ()=>SliceWatch.check());
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) SliceWatch.check(); });
+  }
   if(!Demo.on && (!FS.supported || !FS.secure)){
     document.getElementById('btnAddRoot').classList.add('hidden');
     document.getElementById('btnScan').classList.add('hidden');
@@ -7089,7 +7159,7 @@ const WhatsNew = {
 })();
 
 window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, Quarantine, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
-  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, APP_VERSION};
+  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, SliceWatch, APP_VERSION};
 
 
 })();
