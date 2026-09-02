@@ -463,7 +463,8 @@ const U = {
     const d=Math.floor(min/1440), h=Math.floor(min%1440/60), m=min%60;
     return (d?d+'d ':'')+(h||d?h+'h ':'')+m+'m'; },
   num(n,d){ return n==null||!isFinite(n) ? '—' : Number(n).toLocaleString(undefined,{maximumFractionDigits:d==null?1:d}); },
-  money(n){ return n==null||!isFinite(n) ? '—' : '$'+Number(n).toFixed(2); },
+  // The currency setting existed and was never read, so everything said $.
+  money(n){ return n==null||!isFinite(n) ? '—' : (Store.settings.currency||'$')+Number(n).toFixed(2); },
   ago(ts){ if(!ts) return 'never'; const s=(Date.now()-ts)/1000;
     if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+'m ago';
     if(s<86400) return Math.floor(s/3600)+'h ago'; if(s<2592000) return Math.floor(s/86400)+'d ago';
@@ -3459,6 +3460,7 @@ const Detail = {
       (FS.canOpenExternally ? item(I.folder, 'Open folder', 'PV.Detail.openFolder()') : '') +
       (m.source ? '<a class="b g" style="width:100%;justify-content:flex-start;margin-bottom:6px" href="'+
         U.attr(m.source)+'" target="_blank" rel="noopener noreferrer">'+I.ext+' Open source page</a>' : '') +
+      item(I.chart, 'What would this cost?', 'PV.Cost.open(\''+m.id+'\')') +
       item(I.eyeOff, 'Ignore this folder', 'PV.Detail.exclude()', 'stops indexing it') +
       '<hr>' +
       item(I.trash, 'Delete model', 'PV.Detail.deleteModel()',
@@ -4781,6 +4783,109 @@ const TagBox = {
    Desktop only. A browser page cannot launch a program, and it cannot POST
    to an unencrypted box on your network either.
    ============================================================ */
+/* ============================================================
+   Cost — what a run would cost before you start it
+   ============================================================
+   Print history already costs a print after the fact, filament by weight plus
+   machine time. This asks the same question forwards: this model, this many
+   times, what does that come to, and is there enough on the spool.
+
+   The numbers start from whatever the slicer put in the gcode, so for anything
+   already sliced this is not an estimate, and they stay editable for anything
+   that is not. */
+const Cost = {
+  open(modelId){
+    const m = Store.model(modelId); if(!m) return;
+    const est = m.est || {};
+    const fils = Store.filaments.filter(f=>!f.archived);
+    // Prefer a spool of the material the gcode was sliced for.
+    const pick = fils.find(f=>est.material && f.material === est.material) || fils[0];
+
+    Cost._m = m;
+    Modal.open('Cost of printing "'+U.esc(m.name)+'"',
+      '<div class="fr">'+
+        '<div class="f"><label>How many</label>'+
+          '<input type="number" id="cQty" min="1" step="1" value="1" oninput="PV.Cost.recalc()"></div>'+
+        '<div class="f"><label>Filament</label><select id="cFil" onchange="PV.Cost.onFil()">'+
+          '<option value="">Not from a spool</option>'+
+          fils.map(f=>'<option value="'+U.attr(f.id)+'"'+(pick && f.id===pick.id?' selected':'')+'>'+
+            U.esc(f.brand+' '+f.material+(f.colorName?' '+f.colorName:''))+'</option>').join('')+
+          '</select></div>'+
+      '</div>'+
+      '<div class="fr">'+
+        '<div class="f"><label>Grams each</label>'+
+          '<input type="number" id="cG" min="0" step="0.1" value="'+U.attr(est.grams != null ? est.grams : '')+'" '+
+          'placeholder="from the gcode" oninput="PV.Cost.recalc()"></div>'+
+        '<div class="f"><label>Minutes each</label>'+
+          '<input type="number" id="cT" min="0" step="1" value="'+U.attr(est.timeMin != null ? est.timeMin : '')+'" '+
+          'placeholder="from the gcode" oninput="PV.Cost.recalc()"></div>'+
+      '</div>'+
+      '<div class="fr">'+
+        '<div class="f"><label>Cost per kg</label>'+
+          '<input type="number" id="cKg" min="0" step="0.01" oninput="PV.Cost.recalc()"></div>'+
+        '<div class="f"><label>Running cost per hour</label>'+
+          '<input type="number" id="cHr" min="0" step="0.01" value="'+U.attr(Store.settings.costPerHour||0)+'" '+
+          'oninput="PV.Cost.recalc()"></div>'+
+      '</div>'+
+      (est.grams == null && est.timeMin == null
+        ? '<div class="note">Nothing here has been sliced yet, so there are no figures to start from. '+
+          'Put in what you expect and it will do the arithmetic.</div>' : '')+
+      '<div id="cOut" style="margin-top:14px"></div>',
+      '<div class="sp"></div><button class="b" onclick="PV.Modal.back()">Close</button>');
+
+    Cost.onFil();
+  },
+
+  onFil(){
+    const f = Store.filament(Modal.val('cFil'));
+    const kg = document.getElementById('cKg');
+    if(kg) kg.value = f && f.costPerKg != null ? f.costPerKg : '';
+    Cost.recalc();
+  },
+
+  recalc(){
+    const out = document.getElementById('cOut'); if(!out) return;
+    const qty = Math.max(1, Math.round(Modal.num('cQty') || 1));
+    const g = Modal.num('cG'), t = Modal.num('cT');
+    const perKg = Modal.num('cKg'), perHr = Modal.num('cHr');
+    const f = Store.filament(Modal.val('cFil'));
+
+    const gTotal = (g || 0) * qty;
+    const tTotal = (t || 0) * qty;
+    const fCost = perKg ? gTotal / 1000 * perKg : 0;
+    const mCost = perHr ? tTotal / 60 * perHr : 0;
+    const total = fCost + mCost;
+
+    const row = (label, val, note)=>
+      '<div style="display:flex;gap:10px;align-items:baseline;padding:5px 0">'+
+        '<span style="color:var(--dim);font-size:12.5px;min-width:130px">'+label+'</span>'+
+        '<b>'+val+'</b>'+
+        (note ? '<span class="z" style="color:var(--dim2)">'+note+'</span>' : '')+
+      '</div>';
+
+    let h = row('Filament', U.money(fCost), U.num(gTotal,1)+' g'+(perKg?'':' — no price set'))+
+            row('Machine time', U.money(mCost), U.dur(tTotal))+
+            '<hr style="margin:8px 0">'+
+            row('Total', '<span style="font-size:1.25rem">'+U.money(total)+'</span>',
+                qty > 1 ? U.money(total/qty)+' each' : '');
+
+    /* The question people actually mean by "can I print ten of these" is
+       usually whether there is enough on the spool, not what it costs. */
+    if(f && gTotal){
+      const left = f.remainingG || 0;
+      const short = gTotal - left;
+      h += '<div class="note'+(short > 0 ? ' bad' : '')+'" style="margin-top:12px"><p>'+
+        (short > 0
+          ? 'That needs <b>'+U.num(gTotal,0)+' g</b> and <b>'+U.esc(f.brand+' '+f.material)+'</b> has '+
+            U.num(left,0)+' g left. <b>'+U.num(short,0)+' g short</b>, about '+
+            Math.floor(left / (g||1))+' of them from this spool.'
+          : 'Enough on the spool: '+U.num(left,0)+' g left, this needs '+U.num(gTotal,0)+' g.')+
+        '</p></div>';
+    }
+    out.innerHTML = h;
+  }
+};
+
 /* ============================================================
    SliceWatch — notice the gcode when it lands
    ============================================================
@@ -7290,7 +7395,7 @@ const WhatsNew = {
 })();
 
 window.PV = {U, I, DB, Store, Toast, Prog, Modal, FS, Scan, Meta, Send, Share, Quarantine, AutoTag, Monitor, TagBox, AutoBackup, Render, Thumbs, Work,
-  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, Keys, SliceWatch, APP_VERSION};
+  UI, Library, Detail, Viewer, Archive, Prints, Filament, Queue, Dupes, Stats, Settings, Demo, WhatsNew, Keys, SliceWatch, Cost, APP_VERSION};
 
 
 })();
