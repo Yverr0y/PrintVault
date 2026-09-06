@@ -38,6 +38,10 @@ walkdir = "2"
 # Archive extraction happens here rather than in JS, so entry bytes never cross
 # the IPC bridge. Also covers compression methods the browser cannot inflate.
 zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+# 7z, which the browser build cannot do: it is LZMA, and shipping a decoder for
+# it would mean adding a dependency to a single HTML file that has none. Pure
+# Rust, so it needs no C toolchain on any of the three CI runners.
+sevenz-rust2 = { version = "0.22", default-features = false }
 
 # The macOS share sheet. These are already in the tree because Tauri itself
 # pulls them in on macOS, so this pins nothing new, it just makes them

@@ -1960,6 +1960,11 @@ const DesktopFS = Object.assign({}, FSCommon, {
   async removeDir(rootId, path){
     await DesktopFS._call('pv_remove_dir', {root: DesktopFS._root(rootId), rel: path});
   },
+  /* 7z listing, which only exists here. The browser build leaves list7z
+     undefined and Archive.entries says so rather than failing obscurely. */
+  list7z(rootId, path){
+    return DesktopFS._call('pv_7z_list', {root: DesktopFS._root(rootId), rel: path});
+  },
   async exists(rootId, path){
     try{ return await DesktopFS._call('pv_exists', {root: DesktopFS._root(rootId), rel: path}); }
     catch(e){ return false; }
@@ -2558,7 +2563,7 @@ const Scan = {
     await flush(dirtyMeta);
 
     /* --- 4b. index inside unextracted zips (tail read only, ~256 KB each) --- */
-    const zips = recs.filter(r=>r.kind === 'arch' && r.ext === 'zip' && r.zipV !== META_V &&
+    const zips = recs.filter(r=>r.kind === 'arch' && (r.ext === 'zip' || (r.ext === '7z' && FS.list7z)) && r.zipV !== META_V &&
                                 !layout.dirs.has(U.stem(r.path)));
     const dirtyZip = [];
     for(let i=0;i<zips.length;i++){
@@ -3076,7 +3081,7 @@ const Library = {
       (Library.sel.size ? '<button class="b sm p" onclick="PV.Library.bulk()">'+I.tag+' Edit '+Library.sel.size+' selected</button>' : '')+
       (Library.sel.size && FS.canShare
         ? '<button class="b sm" onclick="PV.Share.open(Array.from(PV.Library.sel))">'+I.share+' Share</button>' : '')+
-      (f.quick==='arch' && all.some(m=>m.archiveExt==='zip')
+      (f.quick==='arch' && all.some(m=>m.archiveExt==='zip' || (m.archiveExt==='7z' && FS.list7z))
         ? '<button class="b sm p" onclick="PV.Archive.bulkPrompt()">'+I.dl+' Extract all</button>' : '')+
       '<div class="seg">'+
         '<button class="'+(s.view==='grid'?'on':'')+'" onclick="PV.Library.setView(\'grid\')" title="Grid">'+I.grid+'</button>'+
@@ -3804,7 +3809,7 @@ const Archive = {
     const listed = Archive._cache.get(m.id) || (f.zip && f.zip.entries);
     let h = '<hr><div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap">'+
       '<h3 style="font-size:13px;color:var(--dim);flex:1">Archive contents</h3>';
-    if(f.ext === 'zip'){
+    if(f.ext === 'zip' || (f.ext === '7z' && FS.list7z)){
       h += '<button class="b sm" onclick="PV.Archive.peek(\''+m.id+'\')">'+I.refresh+
            (listed ? ' Re-read' : ' Look inside')+'</button>'+
            '<button class="b sm p" onclick="PV.Archive.extractPrompt(\''+m.id+'\')">'+I.dl+' Extract here</button>';
@@ -3851,7 +3856,16 @@ const Archive = {
      directory lives. A 30 MB archive costs about 256 KB of reads. */
   async entries(f){
     if(!f) throw new Error('No archive file on this model');
-    if(f.ext !== 'zip' && f.ext !== '3mf') throw new Error('Only .zip and .3mf containers can be read');
+
+    /* 7z has no central directory sitting at the end of the file, so the tail
+       trick below does not apply and there is nothing a browser can do with
+       one: reading it means decoding LZMA, and this app ships as a single file
+       with no dependencies. The desktop shell has a Rust reader for it. */
+    if(f.ext === '7z'){
+      if(!FS.list7z) throw new Error('7z archives can only be read by the desktop app');
+      return await FS.list7z(f.rootId, f.path);
+    }
+    if(f.ext !== 'zip' && f.ext !== '3mf') throw new Error('Only .zip, .7z and .3mf containers can be read');
     let want = 262144;
     for(let attempt = 0; attempt < 4; attempt++){
       const t = await FS.readTail(f.rootId, f.path, want);
@@ -4036,8 +4050,8 @@ const Archive = {
   },
 
   bulkPrompt(){
-    const list = Store.models.filter(m=>m.isArchive && m.archiveExt === 'zip');
-    if(!list.length) return Toast.err('No unextracted zip archives in the library');
+    const list = Store.models.filter(m=>m.isArchive && (m.archiveExt === 'zip' || (m.archiveExt === '7z' && FS.list7z)));
+    if(!list.length) return Toast.err('No unextracted archives in the library');
     const bytes = list.reduce((s,m)=>s+(m.bytes||0), 0);
     Modal.open('Extract '+list.length+' archives?',
       '<p style="color:var(--dim);line-height:1.65;margin:0 0 12px">Each archive is unpacked into a new folder '+
@@ -4053,7 +4067,7 @@ const Archive = {
 
   async bulk(){
     Modal.close();
-    const list = Store.models.filter(m=>m.isArchive && m.archiveExt === 'zip');
+    const list = Store.models.filter(m=>m.isArchive && (m.archiveExt === 'zip' || (m.archiveExt === '7z' && FS.list7z)));
     const roots = U.uniq(list.map(m=>m.rootId));
     for(const rid of roots){
       const root = Store.root(rid);

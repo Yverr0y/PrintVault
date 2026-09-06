@@ -492,6 +492,114 @@ pub struct ExtractResult {
     problems: Vec<String>,
 }
 
+fn is_7z(rel: &str) -> bool {
+    rel.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("7z"))
+}
+
+/// Where an archive entry may be written, relative to the destination.
+///
+/// The zip crate has enclosed_name() for this; the 7z reader hands back raw
+/// names, so this applies the same rule joined() uses on every other path in
+/// this file: each segment has to be one plain name, which rules out "..",
+/// absolute paths and Windows drive prefixes. A leading separator is dropped
+/// rather than refused, which lands the entry inside the destination.
+fn safe_entry_path(name: &str) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    for seg in name.split(['/', '\\']).filter(|s| !s.is_empty()) {
+        let mut parts = Path::new(seg).components();
+        match (parts.next(), parts.next()) {
+            (Some(std::path::Component::Normal(_)), None) => out.push(seg),
+            _ => return None,
+        }
+    }
+    if out.as_os_str().is_empty() { None } else { Some(out) }
+}
+
+/// What is inside a 7z, without unpacking it.
+///
+/// Zip is listed in JS by reading the central directory off the tail of the
+/// file, which needs a couple of hundred kilobytes however large the archive
+/// is. 7z has no equivalent trick reachable from a browser, so listing one has
+/// to happen here. That is also why the browser build cannot read them at all.
+#[tauri::command]
+async fn pv_7z_list(root: String, rel: String) -> Result<Vec<Entry>, String> {
+    let p = joined(&root, &rel)?;
+    let reader = sevenz_rust2::ArchiveReader::open(&p, sevenz_rust2::Password::empty())
+        .map_err(|e| format!("Could not read {}: {}", rel, e))?;
+    Ok(reader
+        .archive()
+        .files
+        .iter()
+        .filter(|e| !e.is_directory())
+        .map(|e| Entry {
+            path: e.name().replace('\\', "/"),
+            name: e.name().rsplit(['/', '\\']).next().unwrap_or("").to_string(),
+            size: e.size(),
+            mtime: 0,
+        })
+        .collect())
+}
+
+/// Unpack a 7z. Same contract as the zip path: count what was written, keep
+/// going past a bad entry, and never write outside the destination.
+fn extract_7z(src: &Path, dest: &Path) -> Result<ExtractResult, String> {
+    let mut reader = sevenz_rust2::ArchiveReader::open(src, sevenz_rust2::Password::empty())
+        .map_err(|e| format!("Could not read the archive: {}", e))?;
+
+    let mut written = 0usize;
+    let mut failed = 0usize;
+    let mut problems: Vec<String> = Vec::new();
+
+    reader
+        .for_each_entries(|entry, rd| {
+            if entry.is_directory() {
+                return Ok(true);
+            }
+            let rel = match safe_entry_path(entry.name()) {
+                Some(p) => p,
+                None => {
+                    failed += 1;
+                    problems.push(format!("{} (unsafe path, refused)", entry.name()));
+                    return Ok(true);
+                }
+            };
+            let out = dest.join(&rel);
+            if let Some(parent) = out.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    failed += 1;
+                    problems.push(format!("{}: {}", rel.display(), e));
+                    return Ok(true);
+                }
+            }
+            let mut w = match fs::File::create(&out) {
+                Ok(w) => w,
+                Err(e) => {
+                    failed += 1;
+                    problems.push(format!("{}: {}", rel.display(), e));
+                    return Ok(true);
+                }
+            };
+            match std::io::copy(rd, &mut w) {
+                // the archive's own size is the check, same as the zip path
+                Ok(n) if n == entry.size() => written += 1,
+                Ok(n) => {
+                    failed += 1;
+                    let _ = fs::remove_file(&out);
+                    problems.push(format!("{}: wrote {} of {} bytes", rel.display(), n, entry.size()));
+                }
+                Err(e) => {
+                    failed += 1;
+                    let _ = fs::remove_file(&out);
+                    problems.push(format!("{}: {}", rel.display(), e));
+                }
+            }
+            Ok(true)
+        })
+        .map_err(|e| format!("Could not unpack the archive: {}", e))?;
+
+    Ok(ExtractResult { written, failed, problems })
+}
+
 /// Unpack an archive into a sibling folder. Done here rather than in JS so
 /// entry bytes never cross the IPC bridge, which is what made large entries
 /// fragile in the browser build. Paths from the archive are sanitised before
@@ -500,6 +608,14 @@ pub struct ExtractResult {
 async fn pv_extract(root: String, archive_rel: String, dest_rel: String) -> Result<ExtractResult, String> {
     let src = joined(&root, &archive_rel)?;
     let dest = joined(&root, &dest_rel)?;
+
+    // 7z is a different container entirely, so it gets its own reader. The zip
+    // crate cannot open one and fails with something unhelpful about a missing
+    // end-of-central-directory record.
+    if is_7z(&archive_rel) {
+        return extract_7z(&src, &dest);
+    }
+
     let file = fs::File::open(&src).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
 
@@ -903,6 +1019,7 @@ pub fn run() {
             pv_share,
             pv_remove_dir,
             pv_check_update,
+            pv_7z_list,
             pv_root_ok
         ])
         .setup(|app| {
