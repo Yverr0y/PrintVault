@@ -835,7 +835,11 @@ const Modal = {
       '<input id="mPhrase" class="mono" autocomplete="off" spellcheck="false" '+
         'style="margin-top:6px;width:100%" placeholder="'+U.attr(phrase)+'">',
       '<button class="b" onclick="PV.Modal.back()">Cancel</button>'+
-      '<button class="b d" id="mYes" disabled>'+U.esc(yesLabel||'Confirm')+'</button>');
+      /* Markup, not text. Every caller passes an icon with its label, the way
+         Modal.open's footer is written everywhere else in this file, and
+         escaping it printed the raw SVG across the dialog. Labels here are all
+         literals a few lines away; nothing user-supplied reaches this. */
+      '<button class="b d" id="mYes" disabled>'+(yesLabel||'Confirm')+'</button>');
 
     const inp = document.getElementById('mPhrase'), yes = document.getElementById('mYes');
     const check = ()=>{ yes.disabled = inp.value.trim().toUpperCase() !== phrase.toUpperCase(); };
