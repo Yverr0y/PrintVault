@@ -446,7 +446,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
  * Copyright (C) 2026 magikh0e
  * License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html)
  */
-const APP_VERSION = '0.2.26';
+const APP_VERSION = '0.2.27';
 
 /* ============================================================
    U — utilities
@@ -5177,12 +5177,16 @@ const Send = {
   },
   printers(){ return Store.printers.filter(p=>p.addr); },
 
-  open(modelId, preferFileId){
+  /* ctx is how the queue tags a send as belonging to one of its rows: it
+     carries the row id, so a finished upload can mark that row printing, and
+     the printer name typed on the row, so the right one starts selected. */
+  open(modelId, preferFileId, ctx){
     const m = Store.model(modelId); if(!m) return;
     if(!FS.canSend) return Toast.err('Sending needs the desktop app');
     const files = Send.candidates(m);
     if(!files.length) return Toast.err('Nothing here a slicer or printer could take');
     Send._model = modelId;
+    Send._ctx = ctx || null;
 
     // whatever you were looking at wins over the usual pick
     const want = preferFileId && files.some(f=>f.id === preferFileId) ? preferFileId : (files[0]||{}).id;
@@ -5209,8 +5213,13 @@ const Send = {
         : 'Whatever this machine opens the file type with. Add slicers in Settings to choose.')+'</div></div>';
 
     if(prs.length){
+      // The queue row names its printer as free text, so match it loosely and
+      // fall back to the first rather than guessing wrong and staying quiet.
+      const named = ctx && ctx.printer ? String(ctx.printer).trim().toLowerCase() : '';
+      const wantP = named ? (prs.find(p=>(p.name||'').trim().toLowerCase() === named)||{}).id : '';
       h += '<div class="f"><label>Printer</label><select id="sndPrinter">'+
-        prs.map(p=>'<option value="'+U.attr(p.id)+'">'+U.esc(p.name)+' &mdash; '+U.esc(p.addr)+'</option>').join('')+
+        prs.map(p=>'<option value="'+U.attr(p.id)+'"'+(p.id===wantP?' selected':'')+'>'+
+          U.esc(p.name)+' &mdash; '+U.esc(p.addr)+'</option>').join('')+
         '</select>'+
         (sliced.length ? '' : '<div class="hint">Nothing here is sliced yet, so a printer would have nothing to run.</div>')+
         '</div>'+
@@ -5278,6 +5287,10 @@ const Send = {
       await FS.sendToPrinter(f.rootId, f.path, p, start);
       Prog.stop(); Modal.close();
       Toast.ok(start ? 'Sent and started on '+p.name : 'Uploaded to '+p.name);
+      /* Only now does the queue row get to say printing. It used to say it the
+         moment you pressed the button, whether or not anything left the
+         machine, which is the whole of issue #4. */
+      if(Send._ctx && Send._ctx.queueId) await Queue.status(Send._ctx.queueId, 'printing');
     }catch(e){
       Prog.stop();
       console.error('[PrintVault] send failed', e);
@@ -5473,14 +5486,15 @@ const Monitor = {
 
 const Queue = {
   /* The queue knew what you meant to print and the printer knew how to receive
-     it, but the two had never been introduced. Opens the same Send dialog the
-     model window uses, with this item's model already chosen. */
-  send(id){
+     it, but the two had never been introduced. Start opens the same Send dialog
+     the model window uses, with this item's model already chosen and its
+     printer selected. Before this it only wrote a word on the record. */
+  start(id){
     const q = Store.queue.find(x=>x.id === id); if(!q) return;
     const m = Store.model(q.modelId);
     if(!m) return Toast.err('That model is no longer in the library');
     if(!FS.canSend) return Toast.err('Sending needs the desktop app');
-    Send.open(m.id);
+    Send.open(m.id, null, {queueId: q.id, printer: q.printer});
   },
 
   render(v){
@@ -5524,10 +5538,16 @@ const Queue = {
           (q.notes?' · '+U.esc(q.notes):'')+'</small></div>'+
         (q.status==='printing' ? '<span class="bdg acc">printing</span>' : '')+
         (m ? '<button class="b g sm ico" onclick="PV.Detail.open(\''+q.modelId+'\')" title="Open model">'+I.eye+'</button>' : '')+
-        (m && FS.canSend && Send.printers().length
-          ? '<button class="b g sm ico" onclick="PV.Queue.send(\''+q.id+'\')" title="Send to printer">'+I.print+'</button>' : '')+
-        '<button class="b sm" onclick="PV.Queue.status(\''+q.id+'\',\''+(q.status==='printing'?'pending':'printing')+'\')">'+
-          (q.status==='printing'?'Pause':'Start')+'</button>'+
+        /* Start sends where sending is possible. Where it is not, the button
+           says what it really does instead of promising a print. */
+        (q.status==='printing'
+          ? '<button class="b sm" onclick="PV.Queue.status(\''+q.id+'\',\'pending\')" '+
+            'title="Put this row back on the pending list">Mark pending</button>'
+          : (m && FS.canSend
+              ? '<button class="b sm" onclick="PV.Queue.start(\''+q.id+'\')" '+
+                'title="Send this to a printer or open it in a slicer">'+I.print+' Start</button>'
+              : '<button class="b sm" onclick="PV.Queue.status(\''+q.id+'\',\'printing\')" '+
+                'title="Sending needs the desktop app. This just notes that you have started it.">Mark printing</button>'))+
         '<button class="b sm p" onclick="PV.Queue.done(\''+q.id+'\')">'+I.check+' Done</button>'+
         '<button class="b g sm ico" onclick="PV.Queue.add(null,\''+q.id+'\')" title="Edit">'+I.edit+'</button>'+
         '<button class="b g sm ico" onclick="PV.Queue.del(\''+q.id+'\')" title="Remove">'+I.x+'</button>'+
@@ -6042,7 +6062,7 @@ const Dupes = {
         if(dupModels.length > 120) h += '<div style="color:var(--dim2);font-size:12.5px;padding:8px">Showing 120 of '+dupModels.length+'.</div>';
       }
     } else {
-      if(!arch.length) h += '<div class="pv-empty">'+I.check+'<h3>No leftover archives</h3><p>No zip or rar files sitting next to a folder of the same name.</p></div>';
+      if(!arch.length) h += '<div class="pv-empty">'+I.check+'<h3>No leftover archives</h3><p>No zip, 7z or rar files sitting next to a folder of the same name.</p></div>';
       else {
         h += '<div class="note">Each archive below has a sibling folder with the same name, so it was probably already extracted. Deleting the archive is usually safe, but PrintVault cannot look inside rar or 7z files to verify.</div>';
         h += '<div class="dupe"><div class="dupe-h"><b>'+arch.length+' archives</b><span class="hash">'+U.bytes(archWaste)+' total</span><div class="sp"></div>'+
@@ -7315,6 +7335,18 @@ const Keys = {
 
 const WhatsNew = {
   notes: [
+    ['0.2.27', [
+      'Start in the queue sends the print now. It used to only write the word printing.',
+      'What a print costs, for one copy or ten, and whether the spool holds out.',
+      'Reading models out of 7z archives, not just zip.',
+      'Six accent colours, under Settings.',
+      'The updater says why it found nothing, and you can ask it to look.'
+    ]],
+    ['0.2.26', [
+      'Gcode is picked up when it lands, so a model updates after you slice it.',
+      'As many slicers as you use, listed in Settings, instead of one.',
+      'This list.'
+    ]],
     ['0.2.25', [
       'Deleting a whole model, instead of one file at a time.',
       'A quarantine view in Settings, so anything removed can be put back.',

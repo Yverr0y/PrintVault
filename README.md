@@ -63,7 +63,8 @@ later you can still see what you ran and whether it worked.
 
 It reads inside zips you never extracted, listing and previewing what's in
 them without unpacking anything. It'll extract them too, and checksums every
-file it writes.
+file it writes. The desktop build does the same with 7z, which a browser has
+no way of opening.
 
 It finds duplicate downloads and proves they're identical with SHA-256 before
 touching anything. By default it moves the copies to a quarantine folder
@@ -72,7 +73,10 @@ didn't want that on my conscience.
 
 There's filament tracking by what's actually left on the spool, and a print
 queue that adds up grams and hours so you know whether you can finish
-something before you start it.
+something before you start it. Start on a queued row sends the file to the
+printer rather than just noting that you meant to. If you want the number
+first, the cost button works out filament and running cost for however many
+copies you're planning.
 
 Everything you type, meaning tags, collections, notes and ratings, exports to
 a JSON backup that restores anywhere. It matches on folder name and relative
