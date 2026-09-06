@@ -363,6 +363,15 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
 .qcard .nm{flex:1;min-width:0}
 .qcard .nm b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qcard .nm small{color:var(--dim2);font-size:11.5px}
+/* One row of buttons plus a name is more than a phone is wide. Left as a
+   nowrap row the name gets squeezed to nothing and wraps a word per line,
+   while the last button hangs off the edge. Let the card wrap instead: name
+   beside the thumbnail, buttons underneath. The 66px is the priority stripe,
+   the thumbnail and the gaps either side of them. */
+@media(max-width:640px){
+  .qcard{flex-wrap:wrap;gap:6px 7px}
+  .qcard .nm{flex:1 1 calc(100% - 66px)}
+}
 .pri{width:6px;align-self:stretch;border-radius:3px;background:var(--dim2)}
 .pri.hi{background:var(--bad)}.pri.md{background:var(--warn)}.pri.lo{background:var(--dim2)}
 
@@ -5290,7 +5299,7 @@ const Send = {
       /* Only now does the queue row get to say printing. It used to say it the
          moment you pressed the button, whether or not anything left the
          machine, which is the whole of issue #4. */
-      if(Send._ctx && Send._ctx.queueId) await Queue.status(Send._ctx.queueId, 'printing');
+      if(Send._ctx && Send._ctx.queueId) await Queue.sent(Send._ctx.queueId, f, p.name);
     }catch(e){
       Prog.stop();
       console.error('[PrintVault] send failed', e);
@@ -5312,6 +5321,7 @@ const Monitor = {
   _timer: null,
   state: {},          // printerId -> last status seen
   _job: {},           // printerId -> what we think is running
+  _logged: {},        // printerId -> this run is already in the print log
   _busy: false,       // a poll is in flight; see tick()
 
   start(){
@@ -5341,6 +5351,8 @@ const Monitor = {
       Monitor.state[p.id] = st;
       if(st.state === 'printing' || st.state === 'paused'){
         Monitor._job[p.id] = {filename: st.filename, elapsed: st.elapsed_s, filament: st.filament_mm};
+        // something is running, so whatever was last written down is history
+        delete Monitor._logged[p.id];
       }
       // the moment it stops having been printing is the moment to log it
       const finished = was && (was.state === 'printing' || was.state === 'paused') &&
@@ -5406,31 +5418,48 @@ const Monitor = {
     const job = Monitor._job[printer.id] || {};
     const name = job.filename || was.filename || '';
     if(!name) return;
-    /* Belt as well as braces: the same job must not be logged twice even if
-       this is reached again, which a restart mid-print or a stray tick could
-       do. Matched on printer, file and day rather than on a flag, so it holds
-       across a reload. */
-    const already = Store.prints.some(x=>x.auto && x.printer === printer.name &&
-      x.date === U.today() && (x.jobFile || '') === name);
-    if(already) return;
+    /* Belt as well as braces: one run must not be logged twice if this is
+       reached again by a stray tick.
+
+       This used to match on printer, file and day, which quietly meant a file
+       could only be logged once in a day. Running the same file again is not an
+       accident, it is the ordinary thing, and a queued run of six is six prints
+       of one file. Only the first was ever recorded, and the other five went
+       unlogged with their filament never coming off the spool.
+
+       The flag below is the honest version of that check. It is set when a run
+       is written down and cleared the moment the printer reports printing
+       again, so one run logs once, and the next run logs on its own account
+       however alike the two look. A reload cannot double up either: the log
+       only fires on a printing to stopped transition, and a fresh window has
+       nothing to have seen printing. */
+    if(Monitor._logged[printer.id]) return;
     const cancelled = now.state === 'cancelled' || now.state === 'error';
     const elapsed = Math.max(was.elapsed_s || 0, job.elapsed || 0);
     const mm = Math.max(was.filament_mm || 0, job.filament || 0);
 
+    const base = U.base(name);
+
+    /* If this app sent the job, the queue row that sent it knows more about it
+       than the printer does: which model, and which spool you meant to use.
+       Worth asking before falling back to guessing at either. */
+    const qrow = Queue.forJob(printer.name, base);
+
     // the spool is found first, because its material sets the density
     // a spool that names this printer wins over one that names none
-    const spool = Store.filaments.find(f=>f.inUse && f.printer === printer.name) ||
+    const spool = (qrow && qrow.filamentId ? Store.filament(qrow.filamentId) : null) ||
+                  Store.filaments.find(f=>f.inUse && f.printer === printer.name) ||
                   Store.filaments.find(f=>f.inUse && !f.printer);
     const grams = Monitor.grams(mm, spool && spool.material);
 
     // Match the job back to a model. The filename is all the printer knows,
     // so try it exactly first, then fall back to the words in it.
-    const base = U.base(name);
     const key = base.toLowerCase();
     const file = Store.files.find(f=>f.name.toLowerCase() === key) ||
                  Store.files.find(f=>U.stem(f.name).toLowerCase() === U.stem(key));
-    const guessed = file ? null : Monitor.guessModel(base);
-    const model = file ? Store.model(file.modelId) : guessed;
+    const queued = !file && qrow ? Store.model(qrow.modelId) : null;
+    const guessed = file || queued ? null : Monitor.guessModel(base);
+    const model = file ? Store.model(file.modelId) : (queued || guessed);
 
     const rec = {
       id: U.id('pt'), modelId: model ? model.id : '', modelName: model ? model.name : U.titleize(U.stem(base)),
@@ -5438,8 +5467,10 @@ const Monitor = {
       printer: printer.name, grams: grams || null,
       timeMin: elapsed ? Math.round(elapsed/60) : null,
       jobFile: name,   // what the printer called it, so the same job is not logged twice
+      loggedAt: Date.now(),   // paired with jobFile to spot a repeated tick
       material: '', notes: (cancelled ? 'Stopped early ('+now.state+')' : 'Logged automatically from '+printer.name)+
         (guessed ? ', matched to this model by name' : '')+
+        (queued ? ', started from the queue' : '')+
         (now.message ? ': '+now.message : ''),
       auto: true
     };
@@ -5453,10 +5484,32 @@ const Monitor = {
       await Store.put('filaments', spool);
       await Store.put('prints', rec);
     }
+    /* Close the row that started this. Anything the app sent, watched and
+       logged by itself should not then need you to go and tick it off.
+
+       A run of six is six prints, so one finished copy advances the count
+       rather than closing the row, and the row goes back to pending so the
+       next copy can be started. A print that stopped early counts for
+       nothing and just goes back to pending. */
+    if(qrow){
+      qrow.jobFile = ''; qrow.jobPrinter = '';
+      if(cancelled){
+        qrow.status = 'pending';
+      } else {
+        qrow.doneQty = (qrow.doneQty || 0) + 1;
+        if(qrow.doneQty >= (qrow.qty || 1)){ qrow.status = 'done'; qrow.doneAt = Date.now(); }
+        else { qrow.status = 'pending'; }
+      }
+      await Store.put('queue', qrow);
+    }
+
+    Monitor._logged[printer.id] = true;
     delete Monitor._job[printer.id];
     UI.render();
     Toast.ok((cancelled ? 'Logged a stopped print' : 'Logged '+(model ? model.name : U.titleize(U.stem(base))))+
-      ' on '+printer.name+(grams ? ', '+grams+'g' : '')+(spool && grams ? ' off '+spool.brand+' '+spool.material : ''));
+      ' on '+printer.name+(grams ? ', '+grams+'g' : '')+(spool && grams ? ' off '+spool.brand+' '+spool.material : '')+
+      (qrow && !cancelled ? (qrow.status === 'done' ? ', and took it off the queue'
+                                                    : ', '+qrow.doneQty+' of '+qrow.qty+' done') : ''));
   },
 
   /* A single line at the top of the window while something is running. */
@@ -5485,6 +5538,11 @@ const Monitor = {
 };
 
 const Queue = {
+  /* How many copies of a row are still to print. A run of six that has had two
+     come off the printer is a run of four, and every count in this view says so
+     rather than repeating the number you first typed. */
+  left(q){ return Math.max(0, (q.qty || 1) - (q.doneQty || 0)); },
+
   /* The queue knew what you meant to print and the printer knew how to receive
      it, but the two had never been introduced. Start opens the same Send dialog
      the model window uses, with this item's model already chosen and its
@@ -5497,13 +5555,36 @@ const Queue = {
     Send.open(m.id, null, {queueId: q.id, printer: q.printer});
   },
 
+  /* Called once a file has actually reached a printer. What gets written down
+     is enough to recognise the same job coming back off that printer later,
+     so the row can be closed by whoever is watching rather than by hand. */
+  async sent(id, file, printerName){
+    const q = Store.queue.find(x=>x.id === id); if(!q) return;
+    q.status = 'printing';
+    q.jobFile = file ? file.name : '';
+    q.jobPrinter = printerName || '';
+    q.sentAt = Date.now();
+    await Store.put('queue', q);
+    UI.render();
+  },
+
+  /* The row a finished job belongs to, or nothing. Matched on the printer and
+     on the stem of the filename, because a printer may store a file under a
+     tidied up name, which is the same allowance the print log makes. */
+  forJob(printerName, base){
+    const stem = U.stem(String(base||'')).toLowerCase();
+    if(!stem) return null;
+    return Store.queue.find(q=>q.status === 'printing' && q.jobPrinter === printerName &&
+      U.stem(String(q.jobFile||'')).toLowerCase() === stem) || null;
+  },
+
   render(v){
     const pending = U.sortBy(Store.queue.filter(q=>q.status!=='done'),
       q=>({hi:0,md:1,lo:2}[q.priority||'md'])*1e13 + (q.addedAt||0)/1e6, 'asc');
     const done = U.sortBy(Store.queue.filter(q=>q.status==='done'), q=>q.doneAt||0, 'desc').slice(0,25);
     const est = pending.reduce((s,q)=>{
       const m = Store.model(q.modelId);
-      return {t: s.t + ((m&&m.est&&m.est.timeMin)||0)*(q.qty||1), g: s.g + ((m&&m.est&&m.est.grams)||0)*(q.qty||1)};
+      return {t: s.t + ((m&&m.est&&m.est.timeMin)||0)*Queue.left(q), g: s.g + ((m&&m.est&&m.est.grams)||0)*Queue.left(q)};
     }, {t:0,g:0});
 
     let h = '<div class="pv-bar"><h2>Print Queue</h2><span class="cnt">'+pending.length+' waiting</span><div class="sp"></div>'+
@@ -5511,7 +5592,7 @@ const Queue = {
       '<button class="b sm p" onclick="PV.Queue.add()">'+I.plus+' Add to queue</button></div>';
 
     if(pending.length) h += '<div class="stats">'+
-      '<div class="stat"><div class="k">Queued</div><div class="v">'+pending.reduce((s,q)=>s+(q.qty||1),0)+'</div><div class="sub">items across '+pending.length+' entries</div></div>'+
+      '<div class="stat"><div class="k">Queued</div><div class="v">'+pending.reduce((s,q)=>s+Queue.left(q),0)+'</div><div class="sub">items across '+pending.length+' entries</div></div>'+
       '<div class="stat"><div class="k">Est. machine time</div><div class="v">'+U.num(est.t/60,0)+'<span style="font-size:13px;color:var(--dim2)"> h</span></div><div class="sub">'+U.dur(est.t)+'</div></div>'+
       '<div class="stat"><div class="k">Est. filament</div><div class="v">'+U.num(est.g/1000,2)+'<span style="font-size:13px;color:var(--dim2)"> kg</span></div><div class="sub">'+U.num(est.g,0)+' g</div></div>'+
       '</div>';
@@ -5530,10 +5611,13 @@ const Queue = {
       return '<div class="qcard">'+
         '<div class="pri '+(q.priority||'md')+'"></div>'+
         '<div class="th">'+(m && m.thumbId ? '<img data-thumb="'+U.attr(m.thumbId)+'">' : I.cube)+'</div>'+
-        '<div class="nm"><b>'+(q.qty>1?'<span class="tg a">'+q.qty+'&times;</span> ':'')+
+        // The badge and the estimates count what is left to print, not what
+        // the run started as, so a batch half way through reads honestly.
+        '<div class="nm"><b>'+(Queue.left(q)>1?'<span class="tg a">'+Queue.left(q)+'&times;</span> ':'')+
           U.esc(m?m.name:(q.name||'(model removed)'))+'</b>'+
           '<small>'+[q.printer, fil?(fil.brand+' '+fil.material+(fil.colorName?' '+fil.colorName:'')):null,
-            e.timeMin?U.dur(e.timeMin*(q.qty||1)):null, e.grams?U.num(e.grams*(q.qty||1),0)+'g':null]
+            q.doneQty?q.doneQty+' of '+(q.qty||1)+' printed':null,
+            e.timeMin?U.dur(e.timeMin*Queue.left(q)):null, e.grams?U.num(e.grams*Queue.left(q),0)+'g':null]
             .filter(Boolean).map(U.esc).join(' · ')+
           (q.notes?' · '+U.esc(q.notes):'')+'</small></div>'+
         (q.status==='printing' ? '<span class="bdg acc">printing</span>' : '')+
@@ -5610,11 +5694,20 @@ const Queue = {
     const q = Store.queue.find(x=>x.id===id); if(!q) return;
     q.status = st; await Store.put('queue', q); UI.render();
   },
+  /* Pressing Done closes the whole row, however many copies were left on it,
+     which is what the button has always meant. Bringing the count up to match
+     keeps it agreeing with a row that was finished a copy at a time instead. */
+  async close(q){
+    q.status = 'done'; q.doneAt = Date.now(); q.doneQty = q.qty || 1;
+    q.jobFile = ''; q.jobPrinter = '';
+    await Store.put('queue', q);
+  },
+
   done(id){
     const q = Store.queue.find(x=>x.id===id); if(!q) return;
     Modal.confirm('Mark as printed?', 'Do you want to log this as a print at the same time? That records the filament, settings, and how it turned out.',
       async ()=>{
-        q.status='done'; q.doneAt=Date.now(); await Store.put('queue', q);
+        await Queue.close(q);
         UI.render();
         Prints.log(q.modelId);
         setTimeout(()=>{ const f=document.getElementById('pFil'); if(f && q.filamentId) f.value=q.filamentId;
@@ -5624,7 +5717,7 @@ const Queue = {
     if(foot){
       const b = document.createElement('button');
       b.className='b'; b.textContent='Just mark done';
-      b.onclick = async ()=>{ q.status='done'; q.doneAt=Date.now(); await Store.put('queue', q); Modal.close(); UI.render(); };
+      b.onclick = async ()=>{ await Queue.close(q); Modal.close(); UI.render(); };
       foot.insertBefore(b, foot.firstChild);
     }
   },
@@ -6008,7 +6101,7 @@ const Dupes = {
       '<div class="stat"><div class="k">Exact duplicates</div><div class="v">'+exact.length+'</div><div class="sub">groups by SHA-256</div></div>'+
       '<div class="stat"><div class="k">Reclaimable</div><div class="v" style="color:'+(waste?'var(--acc)':'inherit')+'">'+U.bytes(waste)+'</div><div class="sub">redundant copies</div></div>'+
       '<div class="stat"><div class="k">Same name + size</div><div class="v">'+similar.length+'</div><div class="sub">unverified, hash to confirm</div></div>'+
-      '<div class="stat"><div class="k">Extracted archives</div><div class="v">'+arch.length+'</div><div class="sub">'+U.bytes(archWaste)+' in zips</div></div>'+
+      '<div class="stat"><div class="k">Extracted archives</div><div class="v">'+arch.length+'</div><div class="sub">'+U.bytes(archWaste)+' in archives</div></div>'+
       '</div>';
 
     h += '<div class="seg" style="margin-bottom:14px;width:fit-content">'+
