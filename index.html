@@ -455,7 +455,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
  * Copyright (C) 2026 magikh0e
  * License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html)
  */
-const APP_VERSION = '0.2.27';
+const APP_VERSION = '0.2.28';
 
 /* ============================================================
    U — utilities
@@ -7428,6 +7428,11 @@ const Keys = {
 
 const WhatsNew = {
   notes: [
+    ['0.2.28', [
+      'A finished print takes itself off the queue, and a run of six counts down as it goes.',
+      'Printing the same file twice in a day is logged twice. Only the first one used to count.',
+      'The queue is usable on a phone again.'
+    ]],
     ['0.2.27', [
       'Start in the queue sends the print now. It used to only write the word printing.',
       'What a print costs, for one copy or ten, and whether the spool holds out.',
