@@ -1,0 +1,82 @@
+# PrintVault - printvault.magikh0e.pl
+#
+# The site is static files, so this only covers three things: pointing errors
+# at the custom page, letting the browser cache the parts that never change,
+# and a few headers that cost nothing.
+
+ErrorDocument 404 /404.html
+ErrorDocument 403 /404.html
+
+# Never list a directory that has no index file.
+Options -Indexes
+
+<IfModule mod_headers.c>
+  # This site loads nothing from anywhere else, and neither does the app, so it
+  # says so. default-src 'none' plus connect-src blob: is the part that earns
+  # its keep: the app renders file names taken off your disk, so if one of those
+  # ever slipped past the escaping it would still have nowhere to send anything.
+  #
+  # 'unsafe-inline' is unavoidable rather than lazy. The app is deliberately one
+  # self-contained file, so its script and styles are inline by design. blob: is
+  # for the parser worker and the previews it renders locally. wasm-unsafe-eval
+  # is absent on purpose, nothing here needs it.
+  #
+  # 'self' in script-src and connect-src is for Cloudflare, which serves Rocket
+  # Loader and its bot check from /cdn-cgi/ on this origin. Leaving it out looks
+  # tighter and is not: Rocket Loader rewrites the app's inline script into an
+  # external one, so blocking it means the page loads and the app never starts.
+  # The value here was never in blocking our own origin, it is that no other
+  # host can be reached at all, which is what keeps a bad filename from phoning
+  # anywhere.
+  Header always set Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' blob:; worker-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+</IfModule>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/plain text/xml application/javascript application/json image/svg+xml
+</IfModule>
+
+# Installers mirrored under /dl/ while the GitHub account is under review.
+#
+# These types are not guesswork for the sake of tidiness. Without them the
+# server calls a .dmg, .AppImage, .deb and .rpm text/plain, and because
+# X-Content-Type-Options above tells the browser not to second guess the
+# server, it believes that and paints the binary into the window rather than
+# saving it. The downloads looked fine in a HEAD request and were unusable in
+# an actual browser.
+<IfModule mod_mime.c>
+  AddType application/octet-stream .msi .exe .dmg .AppImage .appimage .deb .rpm
+  AddType application/gzip .tgz
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(msi|exe|dmg|AppImage|deb|rpm|gz)$">
+    # Saved, never rendered, whatever the browser thinks it can display.
+    Header set Content-Disposition "attachment"
+    # A published installer never changes. The version is in its path, so a new
+    # release cannot collide with a cached copy of an old one.
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_expires.c>
+  ExpiresActive On
+  # Fonts and screenshots are versioned by content, not by name, but they change
+  # rarely enough that a month is fair and saves a round trip on every visit.
+  ExpiresByType font/woff2 "access plus 1 year"
+  ExpiresByType image/png  "access plus 1 month"
+  ExpiresByType image/webp "access plus 1 month"
+  ExpiresByType image/svg+xml "access plus 1 month"
+  # The app is one HTML file that updates in place, so it must never be cached.
+  ExpiresByType text/html "access plus 0 seconds"
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
