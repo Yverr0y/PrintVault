@@ -2,5 +2,6 @@ User-agent: *
 Allow: /
 Disallow: /app/
 Disallow: /probe/
+Disallow: /dl/
 
 Sitemap: https://printvault.magikh0e.pl/sitemap.xml
