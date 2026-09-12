@@ -54,11 +54,17 @@ Options -Indexes
 </IfModule>
 
 <IfModule mod_headers.c>
-  <FilesMatch "\.(msi|exe|dmg|AppImage|deb|rpm|gz)$">
+  <FilesMatch "\.(msi|exe|dmg|AppImage|deb|rpm|gz|zip)$">
     # Saved, never rendered, whatever the browser thinks it can display.
     Header set Content-Disposition "attachment"
     # A published installer never changes. The version is in its path, so a new
     # release cannot collide with a cached copy of an old one.
+    #
+    # Source archives need the opposite and are carved out by their own
+    # .htaccess in dl/<version>/source/, uploaded by tools/mirror-release.sh.
+    # The exception has to live down there and has to be a FilesMatch itself:
+    # Apache merges section directives after plain ones, so a plain rule in a
+    # child directory still loses to this block. Both were tried.
     Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
 </IfModule>

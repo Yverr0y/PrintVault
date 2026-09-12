@@ -1,0 +1,19 @@
+# Source archives only.
+#
+# The parent .htaccess gives every .gz and .zip a one year immutable cache.
+# That is right for an installer and wrong here: immutable means the CDN keeps
+# the first copy it ever saw, so publishing a broken tarball once leaves every
+# visitor getting it while the origin looks perfect and any check that uses a
+# cache buster passes. That happened. A source archive is rebuilt from a tag by
+# a script, so it is exactly the kind of thing that can be wrong on the first go.
+#
+# Written as FilesMatch on purpose. A plain Header here loses to the parent's
+# FilesMatch no matter that this file is a directory deeper, because Apache
+# merges section directives after plain ones. Section against section, the
+# child wins.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(gz|zip|txt)$">
+    Header set Cache-Control "public, max-age=3600"
+    Header unset Expires
+  </FilesMatch>
+</IfModule>
