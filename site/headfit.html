@@ -204,6 +204,7 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
       <button data-t="dark" aria-pressed="true" title="Dark">Dark</button>
       <button data-t="light" title="Light">Light</button>
     </div>
+    <button class="btn" id="btnReset" title="Put everything back to a first visit">Start over</button>
     <button class="btn" id="btnHelp">Help</button>
   </header>
 
@@ -233,6 +234,16 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
   <div class="rowbtn"><button class="btn primary" id="helpClose">Got it</button></div>
+</dialog>
+
+<dialog id="confirmReset">
+  <h3>Start over?</h3>
+  <p>This puts every measurement, the helmet and its placement, the fit range, the section and the ring back to how they were on a first visit, and forgets what is saved in this browser.</p>
+  <p class="note" style="color:var(--ink3)">A helmet you loaded from a file is dropped, so you would need to drop it in again. Nothing on your disk is touched. Units and theme stay as you have them.</p>
+  <div class="rowbtn">
+    <button class="btn" id="resetCancel">Keep what I have</button>
+    <button class="btn primary" id="resetGo">Start over</button>
+  </div>
 </dialog>
 
 <script>/* three.js r128 — https://threejs.org — MIT */
@@ -267,6 +278,11 @@ var S = {
   sec:{ on:false, axis:1, pos:0, flip:false, contour:true },
   ring:{ y:25, wall:3.2, h:6, extra:0, src:'helm', loop:-1, show:false }
 };
+/* Taken before anything stored is merged in, because the literal above is the
+   only record of what a first visit looks like and the merge overwrites it in
+   place. Reset copies out of this rather than trying to work backwards. */
+var DEFAULTS = JSON.parse(JSON.stringify(S));
+
 try{ var saved=localStorage.getItem('headfit.v1'); if(saved){ var o=JSON.parse(saved);
   ['head','helm','fit','sec','ring'].forEach(function(k){ if(o[k]) Object.assign(S[k],o[k]); });
   if(o.units) S.units=o.units; if(o.zup!==undefined) S.zup=o.zup;
@@ -1468,6 +1484,43 @@ document.getElementById('theme').addEventListener('click',function(e){
   S.theme=b.dataset.t; persist(); applyTheme();
 });
 applyTheme();
+
+/* Start over. Deliberately the same sequence the page runs at the bottom of
+   this file when it first loads, so there is one definition of "from the
+   beginning" rather than two that drift.
+
+   Units and theme survive. They are preferences about reading the screen, not
+   work: silently flipping someone back to millimetres and a different colour
+   because they wanted to clear a helmet would be its own small betrayal.
+
+   Setting src back to its default is what drops a loaded file: rebuildHead
+   regenerates the head from the measurements and rebuilds the shell when the
+   helmet is a generated one, replacing whichever meshes were standing. */
+function resetAll(){
+  var keep = { units:S.units, theme:S.theme };
+  Object.keys(DEFAULTS).forEach(function(k){
+    var v = DEFAULTS[k];
+    S[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  });
+  S.units = keep.units; S.theme = keep.theme;
+
+  clearMap(); fitStats=null;
+  try{ localStorage.removeItem('headfit.v1'); }catch(e){}
+
+  rebuildHead();
+  applyHelmTransform();
+  centreHelmet();
+  buildUI();
+  previewRing();
+  viewPreset('iso');
+  refreshHud();
+  renderFitReadout();
+  document.getElementById('inspect').hidden = true;
+  toast('Back to a first visit');
+}
+document.getElementById('btnReset').addEventListener('click',function(){ document.getElementById('confirmReset').showModal(); });
+document.getElementById('resetCancel').addEventListener('click',function(){ document.getElementById('confirmReset').close(); });
+document.getElementById('resetGo').addEventListener('click',function(){ document.getElementById('confirmReset').close(); resetAll(); });
 
 document.getElementById('btnHelp').addEventListener('click',function(){ document.getElementById('help').showModal(); });
 document.getElementById('helpClose').addEventListener('click',function(){ document.getElementById('help').close(); });
