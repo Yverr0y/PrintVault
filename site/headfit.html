@@ -332,12 +332,15 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.7.3';
+var APP_VERSION = '0.7.4';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.7.4', [
+    'Switching to inches no longer leaves the model height reading millimetres.'
+  ]],
   ['0.7.3', [
     'Start over now clears a shared link, so a reset no longer undoes itself on the next reload.',
     'A way back to your own head after looking at someone else’s.',
@@ -1783,10 +1786,8 @@ function buildUI(){
       var o=h('option',null,sel,n+' mesh'); o.value=i; });
     sel.value=S.head.res;
     sel.addEventListener('change',function(){ S.head.res=+sel.value; onHead(); });
-    var P=headParams();
-    readout(b,[['Hat size (US)',hatSize(S.head.C)],
-               ['Shape index',(P.W/P.L*100).toFixed(0)+' w/l'],
-               ['Model height',fmtLen(P.Hc+P.Hf+P.neck,0)]]);
+    var headBox=h('div',null,b); headBox.id='headStats';
+    renderHeadStats();
   } else {
     h('div','hint',b,(S.head.fileName||'Loaded mesh')+' — measurements are ignored while a scan is loaded.');
     btn(b,'Back to measurements',function(){ S.head.src='measure'; rebuildHead(); buildUI(); });
@@ -1941,6 +1942,18 @@ function hatSize(c){
   var inch=c/25.4/Math.PI;
   return (Math.round(inch*8)/8).toFixed(3).replace(/0+$/,'').replace(/\.$/,'')+'  ('+(c/10).toFixed(1)+' cm)';
 }
+/* Its own function so a unit switch can redraw it. It used to be built inline
+   during buildUI, and buildUI is deliberately not called when units change,
+   which left Model height reading 274 mm on a screen that said inches
+   everywhere else until something unrelated rebuilt the panel. */
+function renderHeadStats(){
+  var box=document.getElementById('headStats'); if(!box) return;
+  box.innerHTML='';
+  var P=headParams();
+  readout(box,[['Hat size (US)',hatSize(S.head.C)],
+               ['Shape index',(P.W/P.L*100).toFixed(0)+' w/l'],
+               ['Model height',fmtLen(P.Hc+P.Hf+P.neck,0)]]);
+}
 function renderFitReadout(){
   var box=document.getElementById('fitBox'); if(!box) return;
   box.innerHTML='';
@@ -1988,7 +2001,7 @@ function renderRingReadout(){
 
 /* ============================ actions ============================ */
 var rebuildT=null;
-function onHead(){ if(rebuildT) cancelAnimationFrame(rebuildT);
+function onHead(){ renderHeadStats(); if(rebuildT) cancelAnimationFrame(rebuildT);
   rebuildT=requestAnimationFrame(function(){ rebuildHead(); previewRing(); previewSeal(); persist(); refreshHud(); }); }
 function onShell(){ if(rebuildT) cancelAnimationFrame(rebuildT);
   rebuildT=requestAnimationFrame(function(){ rebuildShell(); previewRing(); persist(); }); }
@@ -2272,7 +2285,7 @@ document.getElementById('units').addEventListener('click',function(e){
   var b=e.target.closest('button'); if(!b) return;
   S.units=b.dataset.u; persist();
   Array.prototype.forEach.call(this.children,function(c){ c.setAttribute('aria-pressed',String(c===b)); });
-  fields.forEach(function(f){ f(); }); renderFitReadout(); renderRingReadout(); refreshHud(); scheduleSection();
+  fields.forEach(function(f){ f(); }); renderHeadStats(); renderFitReadout(); renderRingReadout(); refreshHud(); scheduleSection();
 });
 /* Theme is written onto the root element rather than left to the operating
    system, so this page opens the same way the rest of the site does whatever
