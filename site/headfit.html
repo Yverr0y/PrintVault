@@ -234,7 +234,7 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <p><b>2. Bring in a helmet.</b> Drop an STL or OBJ anywhere on the viewport, or keep the generated shell to sanity-check the workflow. Move and rotate it until it sits where you'd wear it.</p>
   <p><b>3. Check clearance.</b> Analyse fit paints the head by how much room there is: red means the shell passes through you. Switch it to <b>Mask seal</b> for a respirator or a face mask, where the goal is the opposite: a band of gentle press is what seals, a gap is the leak, and the readings cover only the part of your face the mask comes near. A seal needs a face, so switch on <b>Nose and chin</b> under Head, or better, load a scan. The built head is a rough approximation of a face and a scan is an actual one. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
   <p><b>4. Print a ring.</b> A ring is a thin slice of the helmet's inside wall at one height. Print it flat in ten minutes and put it on your head before committing to an eight-hour print.</p>
-  <p><b>Or a seal gasket.</b> In Mask seal mode there is a loop drawn on your face instead of sliced flat through it, so it climbs the nose bridge and drops under the chin the way a real seal has to. Set where it sits and how big it is, print it, hold it on, and see where it lifts away.</p>
+  <p><b>Or a seal gasket.</b> In Mask seal mode there is a loop drawn on your face instead of sliced flat through it, so it climbs the nose bridge and drops under the chin the way a real seal has to. Print it, hold it on, and see where it lifts away. Take the shape from the mask's own open edge and what you print is the mask's actual seal line, which tests the mask; set the shape by hand instead and you are testing whether the head model matches your face, which is worth doing first.</p>
   <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
   <div class="rowbtn"><button class="btn primary" id="helpClose">Got it</button></div>
@@ -273,7 +273,7 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.1.0';
+var APP_VERSION = '0.2.0';
 
 /* ============================ state ============================ */
 var S = {
@@ -299,7 +299,7 @@ var S = {
      all a helmet needs, and is exactly what a face seal cannot be: it climbs
      the nose bridge and drops under the chin. This one is a loop drawn on the
      head itself, so it follows whatever the face is doing. */
-  seal:{ y:-40, wide:140, tall:115, wall:3, band:8, stand:0, show:false }
+  seal:{ src:'shape', y:-40, wide:140, tall:115, wall:3, band:8, stand:0, show:false }
 };
 /* Taken before anything stored is merged in, because the literal above is the
    only record of what a first visit looks like and the merge overwrites it in
@@ -1304,6 +1304,136 @@ function tForY(y,P){
   for(var i=0;i<40;i++){ var mid=(lo+hi)/2; if(yFor(mid,P) < y) lo=mid; else hi=mid; }
   return (lo+hi)/2;
 }
+/* ------------------------------------------------------ rim from the mask
+   The parametric loop below is a guess at where a seal sits. This one is not:
+   it takes the mask's own open edge and lays it onto the face, so the printed
+   gasket is the shape of the mask you are actually holding rather than an
+   ellipse that looks about right.
+
+   An STL has no shared vertices, every triangle carries its own three, so the
+   edges have to be welded by position before any of them can be called a
+   boundary. Quantised to a hundredth of a millimetre, which is finer than any
+   printer and coarser than the noise in an exported mesh. */
+function weldKey(x,y,z){ return Math.round(x*100)+','+Math.round(y*100)+','+Math.round(z*100); }
+
+function boundaryLoops(tris){
+  var idOf=new Map(), pts=[], id=[];
+  for(var i=0;i<tris.length;i+=3){
+    var k=weldKey(tris[i],tris[i+1],tris[i+2]), v=idOf.get(k);
+    if(v===undefined){ v=pts.length/3; idOf.set(k,v); pts.push(tris[i],tris[i+1],tris[i+2]); }
+    id.push(v);
+  }
+  /* An edge shared by two triangles is interior. An edge used once is the rim,
+     which is precisely what an open shell like a mask or a helmet has. */
+  var use=new Map();
+  for(var f=0;f<id.length;f+=3){
+    for(var e=0;e<3;e++){
+      var a=id[f+e], b=id[f+(e+1)%3];
+      if(a===b) continue;
+      var kk = a<b ? a+'_'+b : b+'_'+a;
+      var rec=use.get(kk);
+      if(rec) rec.n++; else use.set(kk,{n:1,a:a,b:b});
+    }
+  }
+  var nbr=new Map();
+  use.forEach(function(r){
+    if(r.n!==1) return;
+    if(!nbr.has(r.a)) nbr.set(r.a,[]); nbr.get(r.a).push(r.b);
+    if(!nbr.has(r.b)) nbr.set(r.b,[]); nbr.get(r.b).push(r.a);
+  });
+  var seen=new Set(), loops=[];
+  nbr.forEach(function(_,start){
+    if(seen.has(start)) return;
+    var loop=[start], prev=-1, cur=start, guard=0;
+    seen.add(start);
+    while(guard++ < 200000){
+      var cand=nbr.get(cur)||[], nxt=-1;
+      for(var c=0;c<cand.length;c++){ if(cand[c]!==prev && !seen.has(cand[c])){ nxt=cand[c]; break; } }
+      if(nxt<0) break;
+      seen.add(nxt); loop.push(nxt); prev=cur; cur=nxt;
+    }
+    if(loop.length>=8) loops.push(loop.map(function(v){ return [pts[v*3],pts[v*3+1],pts[v*3+2]]; }));
+  });
+  return loops;
+}
+
+/* Resampled evenly, because a rim straight off a mesh has whatever vertex
+   spacing the modeller left behind, and sweeping that makes a lumpy gasket. */
+function resampleLoop(loop,n){
+  var m=loop.length, d=[0], total=0, i;
+  for(i=0;i<m;i++){
+    var a=loop[i], b=loop[(i+1)%m];
+    total+=Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]); d.push(total);
+  }
+  var out=[], j=0;
+  for(i=0;i<n;i++){
+    var want=total*i/n;
+    while(j<m && d[j+1]<want) j++;
+    var a2=loop[j%m], b2=loop[(j+1)%m];
+    var seg=d[j+1]-d[j], u=seg>1e-9 ? (want-d[j])/seg : 0;
+    out.push([a2[0]+(b2[0]-a2[0])*u, a2[1]+(b2[1]-a2[1])*u, a2[2]+(b2[2]-a2[2])*u]);
+  }
+  return out;
+}
+
+/* The rim laid onto the face. Each point is walked toward the head until it
+   meets skin, and what comes back is a point on the face with the face's own
+   normal, which is what the sweep needs to sit flat. */
+var rimWhy='';
+function rimOnHead(){
+  rimWhy='';
+  if(!helmetMesh){ rimWhy='Load a mask first.'; return null; }
+  if(!headTris){ rimWhy='No head to project onto yet.'; return null; }
+  if(!helmTris) helmTris=worldTris(helmetMesh);
+  var loops=boundaryLoops(helmTris);
+  if(!loops.length){ rimWhy='This mask has no open edge. A closed solid has no rim to find, so thicken it as a shell or cut the face opening first.'; return null; }
+
+  var hac=new Accel(headTris);
+  var c=[0,0,0], n=0, i;
+  for(i=0;i<headTris.length;i+=3){ c[0]+=headTris[i]; c[1]+=headTris[i+1]; c[2]+=headTris[i+2]; n++; }
+  c[0]/=n; c[1]/=n; c[2]/=n;
+
+  function project(loop){
+    var res=[0,0,0,0], out=[], miss=0;
+    for(var i2=0;i2<loop.length;i2++){
+      var p=loop[i2];
+      var dx=c[0]-p[0], dy=c[1]-p[1], dz=c[2]-p[2];
+      var l=Math.hypot(dx,dy,dz)||1; dx/=l; dy/=l; dz/=l;
+      var r=hac.ray(p[0],p[1],p[2],dx,dy,dz,l+40,res);
+      if(!r){ miss++; out.push(null); continue; }
+      out.push([p[0]+dx*r[0], p[1]+dy*r[0], p[2]+dz*r[0],
+                hac.flip*r[1], hac.flip*r[2], hac.flip*r[3], r[0]]);
+    }
+    return {pts:out, miss:miss};
+  }
+
+  /* Several rims is normal: the face opening, the outer edge, a vent, a strap
+     slot. The seal is the one that lies against the face, so they are scored on
+     how close they land and how much of the loop lands at all. */
+  var best=null;
+  loops.forEach(function(L){
+    var s=project(resampleLoop(L, Math.min(260, Math.max(40, L.length))));
+    var hits=s.pts.filter(Boolean);
+    if(hits.length < s.pts.length*0.6) return;
+    var sum=0; hits.forEach(function(q){ sum+=q[6]; });
+    var mean=sum/hits.length;
+    if(!best || mean<best.mean) best={mean:mean, pts:s.pts, hits:hits.length, total:s.pts.length};
+  });
+  if(!best){
+    rimWhy='Found '+loops.length+' open edge'+(loops.length>1?'s':'')+' but none of them point at your face. Move or turn the mask so its rim faces you.';
+    return null;
+  }
+
+  /* A point that met nothing gets the last good one, so the sweep stays closed
+     rather than tearing a hole where the rim overhangs the jaw. */
+  var last=null, path=[];
+  for(i=0;i<best.pts.length;i++) if(best.pts[i]){ last=best.pts[i]; break; }
+  if(!last) return null;
+  for(i=0;i<best.pts.length;i++){ if(best.pts[i]) last=best.pts[i]; path.push(last); }
+  path.mean=best.mean; path.covered=best.hits/best.total;
+  return path;
+}
+
 function sealPath(P,n){
   var q=S.seal, tC=tForY(q.y,P);
   var A=Math.asin(Math.min(0.96, Math.max(0.03, (q.wide/2)/P.hw)));
@@ -1317,8 +1447,32 @@ function sealPath(P,n){
   }
   return out;
 }
+var sealInfo=null;
 function buildSeal(preview){
-  var P=headParams(), q=S.seal, n=200, path=sealPath(P,n), rows=[];
+  var P=headParams(), q=S.seal, n=200, path, rows=[];
+  if(q.src==='rim'){
+    var rim=rimOnHead();
+    if(!rim){ sealInfo=null; if(preview) clearSeal(); return null; }
+    path=resampleLoop(rim.map(function(p){ return [p[0],p[1],p[2]]; }), n);
+    /* Resampling threw the normals away with the extra points, so they are
+       taken from the head again at the positions that survived. */
+    var hac2=new Accel(headTris), cc=[0,0,0], cn=0, ii;
+    for(ii=0;ii<headTris.length;ii+=3){ cc[0]+=headTris[ii]; cc[1]+=headTris[ii+1]; cc[2]+=headTris[ii+2]; cn++; }
+    cc[0]/=cn; cc[1]/=cn; cc[2]/=cn;
+    var rr=[0,0,0,0];
+    path=path.map(function(p){
+      var dx=cc[0]-p[0], dy=cc[1]-p[1], dz=cc[2]-p[2], l=Math.hypot(dx,dy,dz)||1;
+      dx/=l; dy/=l; dz/=l;
+      var hit=hac2.ray(p[0]-dx*2,p[1]-dy*2,p[2]-dz*2,dx,dy,dz,l+40,rr);
+      return hit ? [p[0]-dx*2+dx*hit[0], p[1]-dy*2+dy*hit[0], p[2]-dz*2+dz*hit[0],
+                    hac2.flip*hit[1], hac2.flip*hit[2], hac2.flip*hit[3]]
+                 : [p[0],p[1],p[2],-dx,-dy,-dz];
+    });
+    sealInfo={mean:rim.mean, covered:rim.covered, n:n};
+  } else {
+    path=sealPath(P,n);
+    sealInfo=null;
+  }
   for(var i=0;i<n;i++){
     var c=path[i], d=path[(i+1)%n];
     var nx=c[3], ny=c[4], nz=c[5];
@@ -1345,7 +1499,17 @@ function buildSeal(preview){
   return g;
 }
 function clearSeal(){ if(sealMesh){ scene.remove(sealMesh); sealMesh.geometry.dispose(); sealMesh=null; } }
-function previewSeal(){ if(S.seal.show) buildSeal(true); else clearSeal(); markDirty(); }
+function previewSeal(){
+  if(S.seal.show) buildSeal(true);
+  else {
+    /* Built and thrown away when hidden, because finding the rim is also what
+       produces the readout, and a panel that only tells you whether it worked
+       once you have switched the preview on is a panel that looks broken. */
+    if(S.seal.src==='rim') buildSeal(false);
+    clearSeal();
+  }
+  markDirty();
+}
 
 /* ============================ ui plumbing ============================ */
 function h(tag,cls,parent,txt){ var e=document.createElement(tag); if(cls) e.className=cls;
@@ -1577,9 +1741,19 @@ function buildUI(){
   if(S.fit.mode==='seal'){
     b=group('Seal gasket');
     h('div','hint',b,'The mask answer to a test ring. A loop drawn on your face rather than sliced flat through it, so it climbs the nose bridge and drops under the chin. Print it, hold it on, and see where it lifts.');
-    addSlider(b,{label:'Centre height',unit:'mm',min:-160,max:100,step:0.5,get:function(){return S.seal.y;},set:function(v){S.seal.y=v;},on:previewSeal});
-    addSlider(b,{label:'Across the face',unit:'mm',min:40,max:220,step:1,get:function(){return S.seal.wide;},set:function(v){S.seal.wide=v;},on:previewSeal});
-    addSlider(b,{label:'Top to bottom',unit:'mm',min:40,max:220,step:1,get:function(){return S.seal.tall;},set:function(v){S.seal.tall=v;},on:previewSeal});
+    seg(b,[['shape','A shape I set'],['rim','The mask’s own edge']],function(){return S.seal.src;},function(v){
+      S.seal.src=v; persist(); previewSeal(); buildUI();
+    });
+    if(S.seal.src==='rim'){
+      h('div','hint',b,'Takes the open edge of the loaded mask and lays it onto your face, so what you print is the shape of the mask itself. Needs a mask with an open rim: a sealed solid has no edge to find.');
+      if(sealInfo) readout(b,[['Rim sits off the face', fmtLen(sealInfo.mean)],
+                              ['Rim reaching the face', Math.round(sealInfo.covered*100)+'%']]);
+      else h('div','note',b, rimWhy || 'Load a mask first.');
+    } else {
+      addSlider(b,{label:'Centre height',unit:'mm',min:-160,max:100,step:0.5,get:function(){return S.seal.y;},set:function(v){S.seal.y=v;},on:previewSeal});
+      addSlider(b,{label:'Across the face',unit:'mm',min:40,max:220,step:1,get:function(){return S.seal.wide;},set:function(v){S.seal.wide=v;},on:previewSeal});
+      addSlider(b,{label:'Top to bottom',unit:'mm',min:40,max:220,step:1,get:function(){return S.seal.tall;},set:function(v){S.seal.tall=v;},on:previewSeal});
+    }
     addSlider(b,{label:'Gasket thickness',unit:'mm',min:0.6,max:10,step:0.2,get:function(){return S.seal.wall;},set:function(v){S.seal.wall=v;},on:previewSeal});
     addSlider(b,{label:'Gasket width',unit:'mm',min:2,max:30,step:0.5,get:function(){return S.seal.band;},set:function(v){S.seal.band=v;},on:previewSeal});
     addSlider(b,{label:'Stand off the skin',unit:'mm',min:-4,max:20,step:0.2,get:function(){return S.seal.stand;},set:function(v){S.seal.stand=v;},on:previewSeal});
