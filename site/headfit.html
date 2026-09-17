@@ -329,12 +329,15 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.3.0';
+var APP_VERSION = '0.4.0';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.4.0', [
+    'Save and load your measurements as a file, for carrying a head between machines.'
+  ]],
   ['0.3.0', [
     'Example heads to start from, so the sliders are not a blank page.',
     'A note on how to actually take each measurement, under Help.',
@@ -1860,7 +1863,14 @@ function buildUI(){
   btn(rb4,'Head',function(){ exportMesh('head'); });
   btn(rb4,'Helmet',function(){ exportMesh('helm'); });
   btn(rb4,'Ring',function(){ exportMesh('ring'); });
+  if(S.fit.mode==='seal') btn(rb4,'Gasket',function(){ exportMesh('seal'); });
   h('div','note',b,'Binary STL, millimetres, one unit per mm.');
+
+  h('div','hint',b,'Your measurements');
+  var rb6=h('div','rowbtn',b);
+  btn(rb6,'Save measurements',exportSettings,'sm');
+  btn(rb6,'Load measurements',pickSettings,'sm');
+  h('div','note',b,'A small JSON file of everything you have typed, for carrying a head between machines. It holds the numbers, not the models, so a loaded scan or helmet has to be dropped in again.');
 }
 function hatSize(c){
   var inch=c/25.4/Math.PI;
@@ -1929,6 +1939,55 @@ function centreHelmet(){
   S.helm.py = (P.Hc+P.hair+S.helm.pad+S.helm.thick) - bb.max.y;
   onHelm(); buildUI();
 }
+/* ---------------------------------------------------------- measurements
+   Everything you type lives in this browser's local storage and nowhere else,
+   so measuring your head carefully on a laptop left you with nothing on your
+   phone. These move it as a file. Meshes already export; this is the part that
+   was missing. */
+function exportSettings(){
+  var out={app:'headfit', version:APP_VERSION, saved:new Date().toISOString(), state:S};
+  saveBlob('headfit-measurements.json',
+    new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));
+  toast('Measurements saved');
+}
+function importSettings(file){
+  var fr=new FileReader();
+  fr.onload=function(){
+    var o;
+    try{ o=JSON.parse(fr.result); }catch(e){ toast('That is not a readable file'); return; }
+    if(!o || o.app!=='headfit' || !o.state){ toast('That is not a Headfit measurements file'); return; }
+    var st=o.state;
+
+    /* Restored by the same whitelist the stored state uses, so a hand edited or
+       older file cannot push unknown keys into the model. */
+    ['head','helm','fit','sec','ring','seal'].forEach(function(k){
+      if(st[k] && typeof st[k]==='object') Object.assign(S[k], st[k]);
+    });
+    if(st.units) S.units=st.units;
+    if(st.theme) S.theme=st.theme;
+    if(st.zup!==undefined) S.zup=st.zup;
+
+    /* The meshes are not in here, only the numbers. A file claiming a loaded
+       scan or a loaded helmet would leave the panel insisting on a model that
+       does not exist, so those go back to the generated ones. */
+    S.head.src='measure'; delete S.head.fileName;
+    S.helm.src='shell';   delete S.helm.fileName;
+    S.seal.show=false;
+
+    persist(); applyTheme();
+    rebuildHead(); applyHelmTransform(); centreHelmet();
+    clearMap(); fitStats=null;
+    buildUI(); previewRing(); previewSeal(); refreshHud(); renderFitReadout();
+    toast('Measurements loaded'+(o.version && o.version!==APP_VERSION ? ', saved by v'+o.version : ''));
+  };
+  fr.readAsText(file);
+}
+function pickSettings(){
+  var inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.addEventListener('change',function(){ if(inp.files[0]) importSettings(inp.files[0]); });
+  inp.click();
+}
+
 function pickFile(which){
   var inp=document.createElement('input'); inp.type='file'; inp.accept='.stl,.obj';
   inp.addEventListener('change',function(){ if(inp.files[0]) loadFile(inp.files[0],which); });
