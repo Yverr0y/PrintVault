@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Headfit — helmet and mask fit bench</title>
-<meta name="description" content="A browser tool for checking whether a helmet will fit before you print it. Build a head from tape measurements, drop in an STL, see where the clearance runs out, and print a ten minute test ring instead of an eight hour helmet.">
+<meta name="description" content="A browser tool for checking whether a helmet will fit before you print it. Build a head from tape measurements, drop in an STL, see where the clearance runs out, and print a ten minute test ring instead of a helmet that takes days.">
 <link rel="canonical" href="https://printvault.magikh0e.pl/headfit.html">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://printvault.magikh0e.pl/headfit.html">
 <meta property="og:title" content="Headfit — helmet and mask fit bench">
-<meta property="og:description" content="Check a helmet or a mask fits before committing to an eight hour print. Clearance maps, seal checks and a test ring you can print in minutes. Runs entirely in the browser; nothing is uploaded.">
+<meta property="og:description" content="Check a helmet or a mask fits before committing to a print measured in days. Clearance maps, seal checks and a test ring you can print in minutes. Runs entirely in the browser; nothing is uploaded.">
 <meta property="og:image" content="https://printvault.magikh0e.pl/og-headfit.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -272,7 +272,7 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <p><b>1. Build your head.</b> Enter a tape measurement around your head just above the brow, plus front-to-back and side-to-side. Everything else has sensible defaults. If you already have a scan, load it instead.</p>
   <p><b>2. Bring in a helmet.</b> Drop an STL or OBJ anywhere on the viewport, or keep the generated shell to sanity-check the workflow. Move and rotate it until it sits where you'd wear it.</p>
   <p><b>3. Check clearance.</b> Analyse fit paints the head by how much room there is: red means the shell passes through you. Switch it to <b>Mask seal</b> for a respirator or a face mask, where the goal is the opposite: a band of gentle press is what seals, a gap is the leak, and the readings cover only the part of your face the mask comes near. A seal needs a face, so switch on <b>Nose and chin</b> under Head, or better, load a scan. The built head is a rough approximation of a face and a scan is an actual one. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
-  <p><b>4. Print a ring.</b> A ring is a thin slice of the helmet's inside wall at one height. Print it flat in ten minutes and put it on your head before committing to an eight-hour print.</p>
+  <p><b>4. Print a ring.</b> A ring is a thin slice of the helmet's inside wall at one height. Print it flat in ten minutes and put it on your head before committing to a print that may run for days.</p>
   <p><b>Or a seal gasket.</b> In Mask seal mode there is a loop drawn on your face instead of sliced flat through it, so it climbs the nose bridge and drops under the chin the way a real seal has to. Print it, hold it on, and see where it lifts away. Take the shape from the mask's own open edge and what you print is the mask's actual seal line, which tests the mask; set the shape by hand instead and you are testing whether the head model matches your face, which is worth doing first.</p>
   <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
@@ -329,12 +329,15 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.5.0';
+var APP_VERSION = '0.6.0';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.6.0', [
+    'Save your head and a loaded helmet together as one file, placement and all, for sending someone the whole setup.'
+  ]],
   ['0.5.0', [
     'Share a head as a link. It rides in the part of the address a browser never sends to a server, because these are measurements of your body.',
     'Opening someone else’s link shows their head without touching your own.'
@@ -1876,9 +1879,12 @@ function buildUI(){
 
   h('div','hint',b,'Your measurements');
   var rb6=h('div','rowbtn',b);
-  btn(rb6,'Save measurements',exportSettings,'sm');
-  btn(rb6,'Load measurements',pickSettings,'sm');
-  h('div','note',b,'A small JSON file of everything you have typed, for carrying a head between machines. It holds the numbers, not the models, so a loaded scan or helmet has to be dropped in again.');
+  btn(rb6,'Save measurements',function(){ exportSettings(false); },'sm');
+  if(helmetMesh && S.helm.src==='file') btn(rb6,'Save head and helmet',function(){ exportSettings(true); },'sm');
+  btn(rb6,'Load a saved file',pickSettings,'sm');
+  h('div','note',b, S.helm.src==='file'
+    ? 'Measurements alone is a small file of the numbers you have typed. Head and helmet puts the loaded mesh in as well, which is large but carries the helmet and exactly where you placed it. A head scan is never included either way.'
+    : 'A small JSON file of everything you have typed, for carrying a head between machines. Load a helmet and you can send that along with it.');
 }
 function hatSize(c){
   var inch=c/25.4/Math.PI;
@@ -2029,11 +2035,38 @@ function applySharedHead(){
    so measuring your head carefully on a laptop left you with nothing on your
    phone. These move it as a file. Meshes already export; this is the part that
    was missing. */
-function exportSettings(){
+/* Base64 in chunks. Doing it in one call on a multi megabyte mesh blows the
+   argument limit on String.fromCharCode and throws, which is a silent failure
+   at exactly the size where someone would be relying on this. */
+function toB64(buf){
+  var b=new Uint8Array(buf), out='', step=0x8000;
+  for(var i=0;i<b.length;i+=step) out+=String.fromCharCode.apply(null, b.subarray(i,i+step));
+  return btoa(out);
+}
+function fromB64(str){
+  var bin=atob(str), b=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) b[i]=bin.charCodeAt(i);
+  return b.buffer;
+}
+
+function exportSettings(withMesh){
   var out={app:'headfit', version:APP_VERSION, saved:new Date().toISOString(), state:S};
-  saveBlob('headfit-measurements.json',
-    new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));
-  toast('Measurements saved');
+  var name='headfit-measurements.json';
+
+  if(withMesh && helmetMesh){
+    /* The mesh goes in untransformed, in the app's own coordinates, because
+       the placement is already in state.helm. Kept apart like that, whoever
+       opens this gets the helmet where you put it and can still move it. */
+    var bytes=binarySTL(trisFromGeom(helmetMesh.geometry,null));
+    out.helmet={name:(S.helm.fileName||'helmet.stl'), stl:toB64(bytes)};
+    name='headfit-bundle.json';
+  }
+
+  var text=JSON.stringify(out, null, out.helmet?0:2);
+  saveBlob(name, new Blob([text],{type:'application/json'}));
+  toast(out.helmet
+    ? 'Saved your head and the helmet, '+Math.round(text.length/1024)+' KB'
+    : 'Measurements saved');
 }
 function importSettings(file){
   var fr=new FileReader();
@@ -2052,18 +2085,39 @@ function importSettings(file){
     if(st.theme) S.theme=st.theme;
     if(st.zup!==undefined) S.zup=st.zup;
 
-    /* The meshes are not in here, only the numbers. A file claiming a loaded
-       scan or a loaded helmet would leave the panel insisting on a model that
-       does not exist, so those go back to the generated ones. */
+    /* A head scan is never in here, so that always goes back to measurements
+       rather than leaving the panel insisting on a model that is not there. */
     S.head.src='measure'; delete S.head.fileName;
-    S.helm.src='shell';   delete S.helm.fileName;
     S.seal.show=false;
 
+    /* A helmet might be, if this is a bundle. Loaded before the transform is
+       applied, because setHelmetGeometry centres nothing and the placement
+       restored above is what puts it back where the sender had it. */
+    var gotMesh=false;
+    if(o.helmet && o.helmet.stl){
+      try{
+        /* parseSTL hands back a flat run of coordinates, not a geometry. The
+           bytes were written by this app in millimetres, so none of the metre
+           rescaling loadFile does for a stranger's file applies here. */
+        var pos=parseSTL(fromB64(o.helmet.stl));
+        if(pos && pos.length){
+          setHelmetGeometry(geomFromPositions(pos), o.helmet.name||'helmet.stl');
+          gotMesh=true;
+        }
+      }catch(e){ toast('The measurements loaded but the helmet in the file did not'); }
+    }
+    if(!gotMesh){ S.helm.src='shell'; delete S.helm.fileName; }
+
     persist(); applyTheme();
-    rebuildHead(); applyHelmTransform(); centreHelmet();
+    rebuildHead();
+    /* No centreHelmet when a mesh came with the file: centring would throw away
+       the placement that is the whole point of sending the helmet along. */
+    applyHelmTransform();
+    if(!gotMesh) centreHelmet();
     clearMap(); fitStats=null;
     buildUI(); previewRing(); previewSeal(); refreshHud(); renderFitReadout();
-    toast('Measurements loaded'+(o.version && o.version!==APP_VERSION ? ', saved by v'+o.version : ''));
+    toast((gotMesh ? 'Head and helmet loaded' : 'Measurements loaded')
+      +(o.version && o.version!==APP_VERSION ? ', saved by v'+o.version : ''));
   };
   fr.readAsText(file);
 }
