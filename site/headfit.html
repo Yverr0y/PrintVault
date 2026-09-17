@@ -175,6 +175,18 @@ dialog{border:1px solid var(--line); border-radius:12px; background:var(--panel)
 dialog::backdrop{background:rgba(8,12,16,.5)}
 dialog h3{margin:0 0 10px; font-size:16px}
 dialog p,dialog li{font-size:13.5px; color:var(--ink2); line-height:1.55}
+.hdet{border-top:1px solid var(--line); margin-top:12px; padding-top:10px}
+.hdet summary{cursor:pointer; font-size:13px; font-weight:600; color:var(--ink); list-style:none}
+.hdet summary::-webkit-details-marker{display:none}
+.hdet summary::before{content:'▸ '; color:var(--ink3)}
+.hdet[open] summary::before{content:'▾ '}
+.hdin{padding:8px 0 2px}
+.hdin p{margin:0 0 9px}
+.nver{display:flex; align-items:baseline; gap:8px; margin:12px 0 4px}
+.nver b{font-size:13px; color:var(--ink)}
+.nver span{font-family:var(--mono); font-size:10.5px; color:var(--ink3)}
+.hdin ul{margin:0 0 4px; padding-left:18px}
+.hdin li{margin:0 0 4px}
 kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-width:2px; border-radius:4px; padding:2px 5px; color:var(--ink)}
 
 @media (max-width:880px){
@@ -237,6 +249,23 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <p><b>Or a seal gasket.</b> In Mask seal mode there is a loop drawn on your face instead of sliced flat through it, so it climbs the nose bridge and drops under the chin the way a real seal has to. Print it, hold it on, and see where it lifts away. Take the shape from the mask's own open edge and what you print is the mask's actual seal line, which tests the mask; set the shape by hand instead and you are testing whether the head model matches your face, which is worth doing first.</p>
   <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
+
+  <details class="hdet">
+    <summary>Taking the measurements</summary>
+    <div class="hdin">
+      <p>A soft tape and a friend beats a ruler and a mirror. Keep the tape snug against the skin and flatten your hair where it will be flattened by the thing you are printing.</p>
+      <p><b>Circumference</b> is the one that matters most, because everything else is scaled to it. Around the head just above the eyebrows and the ears, over the widest part at the back. If you take only one measurement, take this one properly.</p>
+      <p><b>Front to back</b> is from the brow to the back of the skull, as a straight span rather than around the curve. <b>Side to side</b> is the same idea across the widest point, just above the ears. These two only set the shape, since the circumference decides the size, so being a few millimetres out changes whether your head is an oval or a circle rather than whether the helmet fits.</p>
+      <p><b>Brow to top of head</b> is straight up from the eyebrow line to the crown. <b>Brow to chin</b> is straight down the front of the face. <b>Neck stub</b> is just how much neck to draw, which matters for nothing except what you can see.</p>
+      <p>If you have no tape to hand, load one of the example heads on the Head panel and adjust from there. They are plausible starting points rather than anybody's real head.</p>
+    </div>
+  </details>
+
+  <details class="hdet">
+    <summary>What changed</summary>
+    <div class="hdin" id="notes"></div>
+  </details>
+
   <div class="rowbtn"><button class="btn primary" id="helpClose">Got it</button></div>
 </dialog>
 
@@ -273,7 +302,29 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.2.0';
+var APP_VERSION = '0.3.0';
+
+/* Newest first. 0.1.0 is where versioning started rather than where the tool
+   did, so it covers everything that existed by then in one entry instead of
+   inventing releases that never happened. */
+var NOTES = [
+  ['0.3.0', [
+    'Example heads to start from, so the sliders are not a blank page.',
+    'A note on how to actually take each measurement, under Help.',
+    'This list.'
+  ]],
+  ['0.2.0', [
+    'The seal gasket can be taken from the mask’s own open edge, so what you print is the mask’s real seal line instead of a shape you guessed at.',
+    'It reports how far that rim sits off your face and how much of it reaches your face at all.'
+  ]],
+  ['0.1.0', [
+    'Mask seal mode, where a gentle press is the goal and a gap is the failure, which is the opposite of what a helmet wants.',
+    'A nose and a chin on the built head, because a lathe cannot have either and a seal needs both.',
+    'A seal gasket swept along the face rather than sliced flat through it.',
+    'Start over, for when the sliders have got away from you.',
+    'Dark by default with a toggle, matching the rest of the site.'
+  ]]
+];
 
 /* ============================ state ============================ */
 var S = {
@@ -1583,7 +1634,20 @@ function buildUI(){
     S.head.src='measure'; rebuildHead(); buildUI();
   });
   if(S.head.src==='measure'){
-    h('div','hint',b,'Tape around the head just above the brow, then the two calliper spans.');
+    h('div','hint',b,'Tape around the head just above the brow, then the two calliper spans. Help explains where each one goes.');
+    /* Somewhere to start. Nobody knows what 196 mm front to back is supposed to
+       feel like, and a blank set of sliders is a worse first minute than a
+       plausible head you can pull towards your own. Deliberately labelled as
+       starting points: these are made up, not anybody's measurements. */
+    var ex=h('div','rowbtn',b);
+    [['Small',{C:540,L:185,W:145,Hc:100,Hf:116,neck:44,noseP:18,noseW:31,noseD:48,chinP:8,chinW:48}],
+     ['Medium',{C:570,L:196,W:152,Hc:106,Hf:122,neck:46,noseP:21,noseW:34,noseD:52,chinP:9,chinW:52}],
+     ['Large',{C:600,L:206,W:158,Hc:112,Hf:128,neck:50,noseP:24,noseW:37,noseD:56,chinP:10,chinW:56}],
+     ['Child',{C:520,L:176,W:141,Hc:95,Hf:104,neck:38,noseP:15,noseW:28,noseD:42,chinP:6,chinW:45}]
+    ].forEach(function(p){
+      btn(ex,p[0],function(){ Object.assign(S.head,p[1]); onHead(); buildUI(); },'sm');
+    });
+    h('div','hint',b,'Example heads to adjust from, not measurements of anyone real.');
     addSlider(b,{label:'Circumference',unit:'mm',min:420,max:700,step:1,get:function(){return S.head.C;},
       set:function(v){ var k=v/ringPerim(S.head.W/2,S.head.L*0.465,S.head.L*0.535);
         S.head.L*=k; S.head.W*=k; S.head.C=v; },on:onHead});
@@ -1929,6 +1993,16 @@ document.getElementById('theme').addEventListener('click',function(e){
 });
 applyTheme();
 document.getElementById('ver').textContent='v'+APP_VERSION;
+(function(){
+  var box=document.getElementById('notes');
+  NOTES.forEach(function(n){
+    var head=h('div','nver',box);
+    h('b',null,head,n[0]);
+    if(n[0]===APP_VERSION) h('span',null,head,'you are on this');
+    var ul=h('ul',null,box);
+    n[1].forEach(function(line){ h('li',null,ul,line); });
+  });
+})();
 
 /* Start over. Deliberately the same sequence the page runs at the bottom of
    this file when it first loads, so there is one definition of "from the
