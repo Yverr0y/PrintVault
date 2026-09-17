@@ -142,7 +142,11 @@ def digit(tris, ch, ox, oz, top):
         wide = (x1 - x0) > (z1 - z0)
         gx = e if wide else 0.0
         gz = 0.0 if wide else e
-        box(tris, ox + x0 - gx, ox + x1 + gx, top, top + RAISE,
+        # Sunk 0.2 mm into the pad rather than set exactly on it. Resting a
+        # separate solid on a face it shares exactly leaves the two touching
+        # and not overlapping, which is a union a slicer has to be lucky to
+        # get right. Overlapping costs nothing and asks nobody for luck.
+        box(tris, ox + x0 - gx, ox + x1 + gx, top - 0.2, top + RAISE,
                   oz + z0 - gz, oz + z1 + gz)
 
 def at(p, off_y):
@@ -189,7 +193,15 @@ def build(circumference, steps=320):
     for ch in label:
         digit(tris, ch, x, front + wall[0] / 2 - DIGIT_H / 2, HEIGHT)
         x += DIGIT_W + 1.6
-    return tris
+
+    # Everything above is built with Y up, because an oval in XZ with a height
+    # in Y is the way the maths reads. An STL for printing is Z up, and the
+    # first thirteen of these went out the other way: a slicer opened them as a
+    # 213 mm tall part balanced on its rim, needing supports it should never
+    # need. A quarter turn about X on the way out puts the band flat in XY with
+    # the label towards the back of the bed. It is a rotation and not a mirror,
+    # so the winding and the digits both survive it.
+    return [tuple((p[0], -p[2], p[1]) for p in t) for t in tris]
 
 def write_stl(path, tris):
     with open(path, 'wb') as f:
