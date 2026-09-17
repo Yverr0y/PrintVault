@@ -229,7 +229,7 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <h3>How to use Headfit</h3>
   <p><b>1. Build your head.</b> Enter a tape measurement around your head just above the brow, plus front-to-back and side-to-side. Everything else has sensible defaults. If you already have a scan, load it instead.</p>
   <p><b>2. Bring in a helmet.</b> Drop an STL or OBJ anywhere on the viewport, or keep the generated shell to sanity-check the workflow. Move and rotate it until it sits where you'd wear it.</p>
-  <p><b>3. Check clearance.</b> Analyze fit paints the head by how much room there is: red means the shell passes through you. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
+  <p><b>3. Check clearance.</b> Analyse fit paints the head by how much room there is: red means the shell passes through you. Switch it to <b>Mask seal</b> for a respirator or a face mask, where the goal is the opposite: a band of gentle press is what seals, a gap is the leak, and the readings cover only the part of your face the mask comes near. A seal needs a real face, so load a scan rather than using the measured head, which has no nose. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
   <p><b>4. Print a ring.</b> A ring is a thin slice of the helmet's inside wall at one height. Print it flat in ten minutes and put it on your head before committing to an eight-hour print.</p>
   <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
@@ -274,7 +274,12 @@ var S = {
   helm:{ src:'shell', pad:10, thick:4.5, cutY:-32, rise:34,
          px:0, py:0, pz:0, rx:0, ry:0, rz:0, scale:100, opacity:55, wire:false, show:true,
          zup:false },
-  fit:{ minGap:4, maxGap:14, map:true, maxRay:70 },
+  /* mode 'clear' is a helmet: you want a gap everywhere and any interference
+     is a fault. mode 'seal' is a mask or respirator, where the whole point is
+     light interference along a band, because that is a gasket being squashed,
+     and a gap is the failure instead. press is how much squash is comfortable;
+     leak is the gap past which a seal stops being a seal. */
+  fit:{ mode:'clear', minGap:4, maxGap:14, press:1.5, leak:0.8, map:true, maxRay:70 },
   sec:{ on:false, axis:1, pos:0, flip:false, contour:true },
   ring:{ y:25, wall:3.2, h:6, extra:0, src:'helm', loop:-1, show:false }
 };
@@ -1008,25 +1013,72 @@ function analyze(){
   if(!ac || !headMesh){ toast('Load a helmet first'); return; }
   var g=headMesh.geometry, p=g.attributes.position.array, n=g.attributes.normal.array, col=g.attributes.color.array;
   var C={hit:[0.86,0.27,0.22], tight:[0.90,0.58,0.05], ok:[0.10,0.72,0.60], loose:[0.36,0.55,0.92], none:[0.62,0.66,0.70]};
-  var f=S.fit, nV=p.length/3;
+  var f=S.fit, nV=p.length/3, seal=(f.mode==='seal');
   var minGap=1e9, minAt=null, nHit=0, nCov=0, sum=0;
+  /* seal tallies: contact is skin inside the wall, which clearance mode treats
+     as a fault and this mode treats as the goal. */
+  var nSeal=0, nHot=0, nMargin=0, nOpen=0, deepest=0, worstGap=0;
+  /* How near the mask has to be for a point to count as part of the seal at
+     all. Everything further away is either the cavity the mask leaves over your
+     nose and mouth, or somewhere the mask simply is not, and folding either into
+     the numbers produced readings like a 65 mm deep press. Derived from the
+     thresholds rather than being a third slider to set. */
+  var band = Math.max(6, f.press*4, f.leak*4);
   for(var i=0;i<nV;i++){
     var k=i*3, x=p[k],y=p[k+1],z=p[k+2], nx=n[k],ny=n[k+1],nz=n[k+2];
     var c, r=ac.ray(x+nx*0.05,y+ny*0.05,z+nz*0.05,nx,ny,nz,f.maxRay,probeRes);
-    if(r && ac.flip*(r[1]*nx+r[2]*ny+r[3]*nz)>0){ c=C.hit; nHit++; }        // buried in the shell wall
-    else if(r){
-      var d=r[0]; nCov++; sum+=d;
-      if(d<minGap){ minGap=d; minAt=[x,y,z]; }
-      c = d<f.minGap ? C.tight : (d<=f.maxGap ? C.ok : C.loose);
+    var buried = r && ac.flip*(r[1]*nx+r[2]*ny+r[3]*nz)>0;
+    if(!buried && !r) buried = !!ac.ray(x-nx*0.05,y-ny*0.05,z-nz*0.05,-nx,-ny,-nz,f.maxRay,probeRes);
+
+    if(buried){
+      nHit++;
+      if(seal){
+        /* How far past the inner wall the skin sits, which is the squash. Cast
+           back into the head: the first surface met going that way is the wall
+           we came through, and the distance to it is the depth.
+
+           Anything deeper than the band is not a gasket being compressed, it is
+           the mask and the head grossly overlapping, or a point nowhere near
+           the mask at all that the backward ray found something behind. Neither
+           is a seal, so neither is counted or coloured as one. */
+        var ci=ac.ray(x-nx*0.05,y-ny*0.05,z-nz*0.05,-nx,-ny,-nz,f.maxRay,probeRes);
+        var press = ci ? ci[0] : 0;
+        if(press>band){ c=C.none; }
+        else {
+          if(press>deepest) deepest=press;
+          nCov++;
+          if(press<=f.press){ c=C.ok; nSeal++; } else { c=C.hit; nHot++; }
+        }
+      } else c=C.hit;
     }
-    else if(ac.ray(x-nx*0.05,y-ny*0.05,z-nz*0.05,-nx,-ny,-nz,f.maxRay,probeRes)){ c=C.hit; nHit++; } // poked out through it
+    else if(r){
+      var d=r[0];
+      if(seal){
+        /* Past the band is the cavity the mask is meant to leave over your nose
+           and mouth. It is not a leak and it is not a fault, so it is not part
+           of the seal and does not colour as one. */
+        if(d>band){ c=C.none; }
+        else {
+          nCov++; sum+=d;
+          if(d<minGap){ minGap=d; minAt=[x,y,z]; }
+          if(d>worstGap) worstGap=d;
+          if(d<=f.leak){ c=C.tight; nMargin++; } else { c=C.loose; nOpen++; }
+        }
+      } else {
+        nCov++; sum+=d;
+        if(d<minGap){ minGap=d; minAt=[x,y,z]; }
+        c = d<f.minGap ? C.tight : (d<=f.maxGap ? C.ok : C.loose);
+      }
+    }
     else c=C.none;
     col[k]=c[0]; col[k+1]=c[1]; col[k+2]=c[2];
   }
   g.attributes.color.needsUpdate=true;
   matHead.vertexColors=true; matHead.needsUpdate=true;
   S.fit.map=true;
-  fitStats={min:(minGap>1e8?0:minGap), hit:nHit/nV, cov:nCov/nV, avg:nCov?sum/nCov:0, pen:nHit};
+  fitStats={min:(minGap>1e8?0:minGap), hit:nHit/nV, cov:nCov/nV, avg:nCov?sum/nCov:0, pen:nHit,
+            mode:f.mode, seal:nSeal, hot:nHot, margin:nMargin, open:nOpen,
+            deepest:deepest, worstGap:worstGap, touched:nSeal+nHot, band:band};
   var P=headParams(), o=[0,0,0,0,0,0], probes=[];
   if(S.head.src==='measure')
   [['Crown',0,0.985],['Forehead',0,0.28],['Back',Math.PI,0.22],['Left',Math.PI/2,0.06],['Right',-Math.PI/2,0.06]].forEach(function(q){
@@ -1039,7 +1091,14 @@ function analyze(){
   });
   fitStats.probes=probes;
   renderFitReadout();
-  toast(nHit? 'Interference on '+(fitStats.hit*100).toFixed(1)+'% of the head' : 'No interference');
+  if(seal){
+    var band_n = nSeal+nHot+nMargin+nOpen;
+    toast(!band_n ? 'The mask is nowhere near your face'
+      : nSeal ? Math.round(nSeal/band_n*100)+'% of the seal is sealing'
+      : 'Nothing is sealing: nothing sits in the comfortable press');
+  } else {
+    toast(nHit? 'Interference on '+(fitStats.hit*100).toFixed(1)+'% of the head' : 'No interference');
+  }
 }
 function clearMap(){
   if(!headMesh) return;
@@ -1306,11 +1365,29 @@ function buildUI(){
   var rb2=h('div','rowbtn',b);
   btn(rb2,'Analyse fit',function(){ busy(true); setTimeout(function(){ try{ analyze(); } finally { busy(false); } },30); },'primary');
   btn(rb2,'Clear paint',function(){ clearMap(); fitStats=null; renderFitReadout(); },'sm');
-  addSlider(b,{label:'Comfortable gap, from',unit:'mm',min:0,max:30,step:0.5,get:function(){return S.fit.minGap;},set:function(v){S.fit.minGap=v;},on:persist});
-  addSlider(b,{label:'up to',unit:'mm',min:2,max:60,step:0.5,get:function(){return S.fit.maxGap;},set:function(v){S.fit.maxGap=v;},on:persist});
+  /* A helmet and a mask want opposite things from the same measurement, so the
+     mode decides what the colours mean rather than changing how anything is
+     measured. */
+  seg(b,[['clear','Helmet'],['seal','Mask seal']],function(){return S.fit.mode;},function(v){
+    S.fit.mode=v; persist();
+    if(fitStats){ clearMap(); fitStats=null; }
+    buildUI(); renderFitReadout();
+  });
+  if(S.fit.mode==='seal'){
+    h('div','hint',b,'A mask seals by pressing into you a little. Green is that press, red is too much of it, and anything not touching is a way out for air.');
+    addSlider(b,{label:'Comfortable press, up to',unit:'mm',min:0.2,max:8,step:0.1,get:function(){return S.fit.press;},set:function(v){S.fit.press=v;},on:persist});
+    addSlider(b,{label:'Call it a leak past',unit:'mm',min:0.1,max:6,step:0.1,get:function(){return S.fit.leak;},set:function(v){S.fit.leak=v;},on:persist});
+  } else {
+    addSlider(b,{label:'Comfortable gap, from',unit:'mm',min:0,max:30,step:0.5,get:function(){return S.fit.minGap;},set:function(v){S.fit.minGap=v;},on:persist});
+    addSlider(b,{label:'up to',unit:'mm',min:2,max:60,step:0.5,get:function(){return S.fit.maxGap;},set:function(v){S.fit.maxGap=v;},on:persist});
+  }
   var lg=h('div','legend',b);
-  [['hit','Shell passes through you'],['tight','Tighter than your minimum'],['ok','Inside your range'],
-   ['loose','Looser than your range'],['none','No shell overhead']].forEach(function(r){
+  (S.fit.mode==='seal'
+    ? [['ok','Sealing, pressed in gently'],['hit','Pressing too hard'],['tight','Barely touching, may leak'],
+       ['loose','Open, a cavity or a gap'],['none','No mask over this']]
+    : [['hit','Shell passes through you'],['tight','Tighter than your minimum'],['ok','Inside your range'],
+       ['loose','Looser than your range'],['none','No shell overhead']]
+  ).forEach(function(r){
     var sw=h('span','sw',lg); sw.style.background='var(--'+r[0]+')'; h('span',null,lg,r[1]);
   });
   var fitBox=h('div',null,b); fitBox.id='fitBox';
@@ -1359,11 +1436,35 @@ function hatSize(c){
 function renderFitReadout(){
   var box=document.getElementById('fitBox'); if(!box) return;
   box.innerHTML='';
-  if(!fitStats){ h('div','note',box,'Place the helmet, then analyse to paint clearance onto the head.'); return; }
-  var rows=[['Tightest gap', fitStats.pen? 'interference' : fmtLen(fitStats.min)],
-            ['Average gap', fmtLen(fitStats.avg)],
-            ['Head covered', (fitStats.cov*100).toFixed(0)+'%'],
-            ['Interference', (fitStats.hit*100).toFixed(1)+'%']];
+  if(!fitStats){
+    h('div','note',box, S.fit.mode==='seal'
+      ? 'Place the mask, then analyse to see where it is actually touching you.'
+      : 'Place the helmet, then analyse to paint clearance onto the head.');
+    return;
+  }
+  var rows;
+  if(fitStats.mode==='seal'){
+    var touched=fitStats.touched;
+    var inBand = fitStats.seal + fitStats.hot + fitStats.margin + fitStats.open;
+    var pct = function(v){ return inBand ? (v/inBand*100).toFixed(0)+'%' : '0%'; };
+    rows = inBand
+      ? [['Sealing', pct(fitStats.seal)],
+         ['Pressing too hard', pct(fitStats.hot)],
+         ['Barely touching', pct(fitStats.margin)],
+         ['Open', pct(fitStats.open)],
+         ['Deepest press', fmtLen(fitStats.deepest)],
+         ['Widest gap in the seal', fmtLen(fitStats.worstGap)],
+         /* The percentages above are shares of this, not of your whole face, and
+            the count moves a great deal as the mask moves. Without it on screen
+            two readings are not comparable and it is not obvious why. */
+         ['Measured within', fmtLen(fitStats.band)+', '+inBand+' points']]
+      : [['Seal', 'the mask is nowhere near your face']];
+  } else {
+    rows=[['Tightest gap', fitStats.pen? 'interference' : fmtLen(fitStats.min)],
+          ['Average gap', fmtLen(fitStats.avg)],
+          ['Head covered', (fitStats.cov*100).toFixed(0)+'%'],
+          ['Interference', (fitStats.hit*100).toFixed(1)+'%']];
+  }
   (fitStats.probes||[]).forEach(function(p){ rows.push([p[0], p[1]]); });
   readout(box,rows);
 }
