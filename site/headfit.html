@@ -110,6 +110,9 @@ button,input,select{font:inherit;color:inherit}
   border:1px solid var(--line); border-radius:999px; padding:1px 7px; align-self:center}
 @media (max-width:820px){ .brand span:not(.ver){display:none} }
 .bar .sp{flex:1}
+.fld .nm{width:100%; background:var(--sunk); border:1px solid var(--line); border-radius:var(--r);
+  color:var(--ink); font:inherit; font-size:13px; padding:6px 9px}
+.fld .nm:focus{outline:2px solid var(--accent); outline-offset:1px}
 .seg{display:flex; background:var(--sunk); border:1px solid var(--line); border-radius:var(--r); padding:2px; gap:2px}
 .seg button{background:none;border:0;border-radius:5px;padding:4px 9px;cursor:pointer;color:var(--ink2);font-size:12.5px;font-weight:500}
 .seg button:hover{color:var(--ink)}
@@ -329,12 +332,16 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.6.0';
+var APP_VERSION = '0.7.0';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.7.0', [
+    'Name a head, and every file you save is named after it instead of after nothing.',
+    'The name travels with a share link too.'
+  ]],
   ['0.6.0', [
     'Save your head and a loaded helmet together as one file, placement and all, for sending someone the whole setup.'
   ]],
@@ -367,6 +374,10 @@ var NOTES = [
 var S = {
   units:'mm',
   theme:'dark',
+  /* What this head is called. Purely so a saved file is named after the
+     person rather than after nothing, which matters the moment there are
+     three of them in a downloads folder. */
+  name:'',
   head:{ src:'measure', C:570, L:196, W:152, link:true, Hc:106, Hf:122, neck:46,
          ears:true, earP:19, earH:62, earL:33, hair:0, res:1,
          /* Off by default. A helmet clears the face anyway, and switching it on
@@ -399,7 +410,8 @@ try{ var saved=localStorage.getItem('headfit.v1'); if(saved){ var o=JSON.parse(s
   if(o.units) S.units=o.units; if(o.zup!==undefined) S.zup=o.zup;
   /* The scalars are restored by name rather than merged wholesale, so a new
      one has to be listed here or it saves fine and silently never comes back. */
-  if(o.theme) S.theme=o.theme; } }catch(e){}
+  if(o.theme) S.theme=o.theme;
+  if(typeof o.name==='string') S.name=o.name; } }catch(e){}
 function persist(){ try{ localStorage.setItem('headfit.v1', JSON.stringify(S)); }catch(e){} }
 
 /* ============================ small math ============================ */
@@ -1672,6 +1684,15 @@ function buildUI(){
     if(v==='file'){ pickFile('head'); return; }
     S.head.src='measure'; rebuildHead(); buildUI();
   });
+  /* Above the measurements rather than buried with the save buttons, because
+     it is a label for this head and not a setting for the export. */
+  var nameWrap=h('div','fld',b);
+  h('label',null,nameWrap,'Whose head is this');
+  var nameIn=h('input','nm',nameWrap);
+  nameIn.type='text'; nameIn.placeholder='Unnamed'; nameIn.maxLength=48;
+  nameIn.value=S.name||'';
+  nameIn.addEventListener('input',function(){ S.name=nameIn.value; persist(); refreshHud(); });
+
   if(S.head.src==='measure'){
     h('div','hint',b,'Tape around the head just above the brow, then the two calliper spans. Help explains where each one goes.');
     /* Somewhere to start. Nobody knows what 196 mm front to back is supposed to
@@ -1978,17 +1999,28 @@ var SHARE_RANGE = {C:[420,700], L:[150,250], W:[110,200], Hc:[60,160], Hf:[70,18
                    face:[0,1], noseP:[0,40], noseW:[16,60], noseD:[25,90], chinP:[0,30], chinW:[25,90]};
 
 function encodeHead(){
-  return 'h1,' + SHARE_KEYS.map(function(k){
+  var body = SHARE_KEYS.map(function(k){
     var v = S.head[k];
     if(typeof v === 'boolean') return v ? '1' : '0';
     return String(Math.round(Number(v)*10)/10);
   }).join(',');
+  /* The name rides along last if there is one. Escaped, which matters more than
+     it looks: a comma in a name would otherwise split into a field of its own
+     and the whole thing would decode as the wrong length and be thrown away. */
+  var n = String(S.name||'').slice(0,48);
+  return 'h1,' + body + (n ? ',' + encodeURIComponent(n) : '');
 }
 function decodeHead(str){
   if(!str) return null;
   var p = String(str).split(',');
-  if(p.shift() !== 'h1' || p.length !== SHARE_KEYS.length) return null;
+  if(p.shift() !== 'h1') return null;
+  var named = p.length === SHARE_KEYS.length + 1;
+  if(p.length !== SHARE_KEYS.length && !named) return null;
   var out = {};
+  if(named){
+    try{ out._name = decodeURIComponent(p.pop()).slice(0,48); }
+    catch(e){ return null; }   /* a mangled escape is a mangled link */
+  }
   for(var i=0;i<SHARE_KEYS.length;i++){
     var k = SHARE_KEYS[i], n = Number(p[i]);
     if(!isFinite(n)) return null;
@@ -2025,6 +2057,7 @@ function copyShareLink(){
 function applySharedHead(){
   var hit = decodeHead((location.hash||'').replace(/^#/,''));
   if(!hit) return false;
+  if(hit._name !== undefined){ S.name = hit._name; delete hit._name; }
   Object.assign(S.head, hit);
   S.head.src='measure'; delete S.head.fileName;
   return true;
@@ -2049,9 +2082,18 @@ function fromB64(str){
   return b.buffer;
 }
 
+/* A filename from whatever they typed. Anything a file system or a download
+   header might object to is dropped rather than escaped, because the point is
+   a name someone recognises in a folder, not a faithful transcription. */
+function slugName(){
+  var n=String(S.name||'').toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48);
+  return n || '';
+}
 function exportSettings(withMesh){
   var out={app:'headfit', version:APP_VERSION, saved:new Date().toISOString(), state:S};
-  var name='headfit-measurements.json';
+  var slug=slugName();
+  var name=(slug || 'headfit')+'-measurements.json';
 
   if(withMesh && helmetMesh){
     /* The mesh goes in untransformed, in the app's own coordinates, because
@@ -2059,7 +2101,7 @@ function exportSettings(withMesh){
        opens this gets the helmet where you put it and can still move it. */
     var bytes=binarySTL(trisFromGeom(helmetMesh.geometry,null));
     out.helmet={name:(S.helm.fileName||'helmet.stl'), stl:toB64(bytes)};
-    name='headfit-bundle.json';
+    name=(slug || 'headfit')+'-bundle.json';
   }
 
   var text=JSON.stringify(out, null, out.helmet?0:2);
@@ -2084,6 +2126,7 @@ function importSettings(file){
     if(st.units) S.units=st.units;
     if(st.theme) S.theme=st.theme;
     if(st.zup!==undefined) S.zup=st.zup;
+    if(typeof st.name==='string') S.name=st.name.slice(0,48);
 
     /* A head scan is never in here, so that always goes back to measurements
        rather than leaving the panel insisting on a model that is not there. */
@@ -2165,11 +2208,12 @@ function loadFile(file,which){
 }
 function exportMesh(what){
   var tris=null, name='headfit';
-  if(what==='head'){ if(!headMesh) return; tris=trisFromGeom(headMesh.geometry,null); name='head-'+Math.round(S.head.C)+'mm'; }
+  var who=slugName(); who = who ? who+'-' : '';
+  if(what==='head'){ if(!headMesh) return; tris=trisFromGeom(headMesh.geometry,null); name=who+'head-'+Math.round(S.head.C)+'mm'; }
   else if(what==='helm'){ if(!helmetMesh) return; helmetGroup.updateMatrixWorld(true);
-    tris=trisFromGeom(helmetMesh.geometry, helmetMesh.matrixWorld); name='helmet-placed'; }
-  else if(what==='seal'){ var gs=buildSeal(S.seal.show); if(!gs) return; tris=trisFromGeom(gs,null); name='seal-'+Math.round(S.seal.y)+'mm'; }
-  else { var g=buildRing(S.ring.show); if(!g) return; tris=trisFromGeom(g,null); name='ring-'+Math.round(S.ring.y)+'mm'; }
+    tris=trisFromGeom(helmetMesh.geometry, helmetMesh.matrixWorld); name=who+'helmet-placed'; }
+  else if(what==='seal'){ var gs=buildSeal(S.seal.show); if(!gs) return; tris=trisFromGeom(gs,null); name=who+'seal-'+Math.round(S.seal.y)+'mm'; }
+  else { var g=buildRing(S.ring.show); if(!g) return; tris=trisFromGeom(g,null); name=who+'ring-'+Math.round(S.ring.y)+'mm'; }
   if(S.zup!==false){
     var mn=1e30;
     for(var i=0;i<tris.length;i+=3){ var y=tris[i+1], z=tris[i+2], nz=y; if(nz<mn) mn=nz; }
@@ -2182,6 +2226,7 @@ function refreshHud(){
   var hud=document.getElementById('hud'); hud.innerHTML='';
   var P=headParams();
   function pill(label,val){ var p=h('div','pill',hud); h('em',null,p,label); h('span',null,p,val); }
+  if(S.name) pill('who', S.name);
   pill('head', fmtLen(S.head.C,0)+' around');
   if(fitStats) pill('fit', fitStats.pen? 'interference' : fmtLen(fitStats.min)+' tightest');
   if(S.sec.on) pill('cut', fmtLen(S.sec.pos));
