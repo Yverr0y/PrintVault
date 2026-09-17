@@ -329,12 +329,16 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.4.0';
+var APP_VERSION = '0.5.0';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.5.0', [
+    'Share a head as a link. It rides in the part of the address a browser never sends to a server, because these are measurements of your body.',
+    'Opening someone else’s link shows their head without touching your own.'
+  ]],
   ['0.4.0', [
     'Save and load your measurements as a file, for carrying a head between machines.'
   ]],
@@ -1596,9 +1600,11 @@ function previewSeal(){
 function h(tag,cls,parent,txt){ var e=document.createElement(tag); if(cls) e.className=cls;
   if(txt!=null) e.textContent=txt; if(parent) parent.appendChild(e); return e; }
 var toastT=null;
-function toast(msg){
+function toast(msg,ms){
   var t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
-  clearTimeout(toastT); toastT=setTimeout(function(){ t.classList.remove('on'); },2400);
+  /* A sentence needs longer on screen than "Measurements saved" does, so the
+     few messages that are a sentence can ask for it. */
+  clearTimeout(toastT); toastT=setTimeout(function(){ t.classList.remove('on'); }, ms||2400);
 }
 function busy(on){ document.getElementById('busy').classList.toggle('on',!!on); }
 var fields=[];
@@ -1678,6 +1684,8 @@ function buildUI(){
       btn(ex,p[0],function(){ Object.assign(S.head,p[1]); onHead(); buildUI(); },'sm');
     });
     h('div','hint',b,'Example heads to adjust from, not measurements of anyone real.');
+    var sh=h('div','rowbtn',b);
+    btn(sh,'Copy a link to this head',copyShareLink,'sm');
     addSlider(b,{label:'Circumference',unit:'mm',min:420,max:700,step:1,get:function(){return S.head.C;},
       set:function(v){ var k=v/ringPerim(S.head.W/2,S.head.L*0.465,S.head.L*0.535);
         S.head.L*=k; S.head.W*=k; S.head.C=v; },on:onHead});
@@ -1939,6 +1947,83 @@ function centreHelmet(){
   S.helm.py = (P.Hc+P.hair+S.helm.pad+S.helm.thick) - bb.max.y;
   onHelm(); buildUI();
 }
+/* ------------------------------------------------------------- sharing
+   A head as a link. Measuring properly takes a tape and a patient friend, and
+   the result is worth being able to send someone, or to open on the machine
+   you actually print from.
+
+   It lives in the fragment, after the #, which is the part a browser never
+   sends to a server. These are measurements of somebody's body and there is no
+   reason for this site's logs, or Cloudflare's, to ever see them.
+
+   Fixed order rather than JSON so the link stays short enough to paste into a
+   message without it wrapping into something unclickable: a whole head is about
+   seventy characters. The h1 prefix is there so a later change of fields can be
+   told apart from this one instead of quietly loading nonsense. */
+var SHARE_KEYS = ['C','L','W','Hc','Hf','neck','ears','earP','earH','earL','hair','res',
+                  'face','noseP','noseW','noseD','chinP','chinW'];
+/* The same bounds the sliders enforce, copied rather than invented: a link
+   that set a value beyond a slider's reach would leave the model holding one
+   number and the panel showing another, with no way to drag back to it. A link
+   is also typed by strangers and mangled by chat clients, so nothing off one is
+   trusted into the geometry. */
+var SHARE_RANGE = {C:[420,700], L:[150,250], W:[110,200], Hc:[60,160], Hf:[70,180], neck:[0,90],
+                   ears:[0,1], earP:[5,40], earH:[40,90], earL:[5,120], hair:[0,30], res:[0,2],
+                   face:[0,1], noseP:[0,40], noseW:[16,60], noseD:[25,90], chinP:[0,30], chinW:[25,90]};
+
+function encodeHead(){
+  return 'h1,' + SHARE_KEYS.map(function(k){
+    var v = S.head[k];
+    if(typeof v === 'boolean') return v ? '1' : '0';
+    return String(Math.round(Number(v)*10)/10);
+  }).join(',');
+}
+function decodeHead(str){
+  if(!str) return null;
+  var p = String(str).split(',');
+  if(p.shift() !== 'h1' || p.length !== SHARE_KEYS.length) return null;
+  var out = {};
+  for(var i=0;i<SHARE_KEYS.length;i++){
+    var k = SHARE_KEYS[i], n = Number(p[i]);
+    if(!isFinite(n)) return null;
+    var r = SHARE_RANGE[k];
+    n = Math.min(r[1], Math.max(r[0], n));
+    out[k] = (k==='ears' || k==='face') ? !!Math.round(n) : n;
+  }
+  return out;
+}
+function shareLink(){
+  return location.origin + location.pathname + '#' + encodeHead();
+}
+function copyShareLink(){
+  var url = shareLink();
+  function done(){ toast('Link copied, it carries your head and nothing else'); }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(done, function(){ fallback(); });
+  } else fallback();
+  function fallback(){
+    /* Clipboard access is refused often enough, on http and in older browsers,
+       that dropping the link on the floor is not an option. */
+    var ta=document.createElement('textarea');
+    ta.value=url; ta.setAttribute('readonly','');
+    ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); done(); }
+    catch(e){ toast('Could not copy. The link is in the address bar.'); location.hash=encodeHead(); }
+    ta.remove();
+  }
+}
+/* Applied without persisting, deliberately. Someone opening a friend's link has
+   not asked to lose their own measurements, so what is stored stays stored
+   until they change something themselves, at which point it is theirs. */
+function applySharedHead(){
+  var hit = decodeHead((location.hash||'').replace(/^#/,''));
+  if(!hit) return false;
+  Object.assign(S.head, hit);
+  S.head.src='measure'; delete S.head.fileName;
+  return true;
+}
+
 /* ---------------------------------------------------------- measurements
    Everything you type lives in this browser's local storage and nowhere else,
    so measuring your head carefully on a laptop left you with nothing on your
@@ -2150,6 +2235,9 @@ window.addEventListener('keydown',function(e){
 if(window.matchMedia) try{ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){ scheduleSection(); }); }catch(e){}
 
 /* ============================ go ============================ */
+/* Before the first build, so a link opens as that head rather than
+   flashing yours and replacing it a frame later. */
+var fromLink = applySharedHead();
 rebuildHead();
 applyHelmTransform();
 buildUI();
@@ -2158,6 +2246,16 @@ previewSeal();
 resize();
 viewPreset('iso');
 refreshHud();
+if(fromLink) toast('Opened a head from the link. Your own is untouched until you change something.', 5200);
+/* Pasting a link while already on the page changes the fragment and nothing
+   else: the browser does not reload for a # alone, so without this the address
+   bar would show one head and the screen another. */
+window.addEventListener('hashchange',function(){
+  if(!applySharedHead()) return;
+  rebuildHead(); clearMap(); fitStats=null;
+  buildUI(); previewRing(); previewSeal(); refreshHud(); renderFitReadout();
+  toast('Opened a head from the link. Your own is untouched until you change something.', 5200);
+});
 new ResizeObserver(resize).observe(stage);
 })();
 </script>
