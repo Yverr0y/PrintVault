@@ -277,7 +277,7 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <p><b>3. Check clearance.</b> Analyse fit paints the head by how much room there is: red means the shell passes through you. Switch it to <b>Mask seal</b> for a respirator or a face mask, where the goal is the opposite: a band of gentle press is what seals, a gap is the leak, and the readings cover only the part of your face the mask comes near. A seal needs a face, so switch on <b>Nose and chin</b> under Head, or better, load a scan. The built head is a rough approximation of a face and a scan is an actual one. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
   <p><b>4. Print a ring.</b> A ring is a thin slice of the helmet's inside wall at one height. Print it flat in ten minutes and put it on your head before committing to a print that may run for days.</p>
   <p><b>Or a seal gasket.</b> In Mask seal mode there is a loop drawn on your face instead of sliced flat through it, so it climbs the nose bridge and drops under the chin the way a real seal has to. Print it, hold it on, and see where it lifts away. Take the shape from the mask's own open edge and what you print is the mask's actual seal line, which tests the mask; set the shape by hand instead and you are testing whether the head model matches your face, which is worth doing first.</p>
-  <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
+  <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower &nbsp; <kbd>?</kbd> this help</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
 
   <details class="hdet">
@@ -332,12 +332,17 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.7.2';
+var APP_VERSION = '0.7.3';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.7.3', [
+    'Start over now clears a shared link, so a reset no longer undoes itself on the next reload.',
+    'A way back to your own head after looking at someone else’s.',
+    'Press ? for help.'
+  ]],
   ['0.7.2', [
     'An alien among the example heads, for cosplay and for seeing what the sliders can do.'
   ]],
@@ -1693,8 +1698,10 @@ function buildUI(){
   /* Above the measurements rather than buried with the save buttons, because
      it is a label for this head and not a setting for the export. */
   var nameWrap=h('div','fld',b);
-  h('label',null,nameWrap,'Whose head is this');
-  var nameIn=h('input','nm',nameWrap);
+  /* Wrapped rather than left as a sibling, which is how addToggle does it and
+     is why every other label in this panel focuses its control when clicked. */
+  var nameLab=h('label',null,nameWrap,'Whose head is this');
+  var nameIn=h('input','nm',nameLab);
   /* An example rather than the word Unnamed. "Unnamed" describes the empty
      state, which the empty box already does, and tells nobody what sort of
      thing to type. The label asks whose head it is and the placeholder answers
@@ -1703,6 +1710,7 @@ function buildUI(){
   nameIn.value=S.name||'';
   nameIn.addEventListener('input',function(){ S.name=nameIn.value; persist(); refreshHud(); });
   h('div','hint',nameWrap,'Names anything you save, so three heads in a downloads folder stay apart.');
+  if(location.hash) btn(h('div','rowbtn',nameWrap),'Back to my head',backToMine,'sm');
 
   if(S.head.src==='measure'){
     h('div','hint',b,'Tape around the head just above the brow, then the two calliper spans. Help explains where each one goes.');
@@ -2307,7 +2315,23 @@ document.getElementById('ver').textContent='v'+APP_VERSION;
    Setting src back to its default is what drops a loaded file: rebuildHead
    regenerates the head from the measurements and rebuilds the shell when the
    helmet is a generated one, replacing whichever meshes were standing. */
+/* Arriving by link is a visit, not a change of identity. Leaving one means
+   putting the address back to this page, or the next reload quietly hands the
+   visitor's head back and whatever you did in between looks undone. */
+function clearLink(){
+  if(!location.hash) return;
+  history.replaceState(null, '', location.pathname + location.search);
+}
+/* Your own measurements are still in storage the whole time a link is open,
+   untouched, and until now nothing said how to get back to them short of
+   editing the address bar. A reload with the fragment gone does it. */
+function backToMine(){
+  clearLink();
+  location.reload();
+}
+
 function resetAll(){
+  clearLink();
   var keep = { units:S.units, theme:S.theme };
   Object.keys(DEFAULTS).forEach(function(k){
     var v = DEFAULTS[k];
@@ -2350,6 +2374,14 @@ window.addEventListener('keydown',function(e){
   else if(e.key==='ArrowDown'){ if(e.shiftKey) S.helm.rx+=step; else S.helm.pz+=step; }
   else if(e.key===']'){ S.helm.py+=step; }
   else if(e.key==='['){ S.helm.py-=step; }
+  else if(e.key==='?'){
+    /* Same key the main app uses. Help is where the measuring guide and the
+       list of what changed live, so it deserves a way in that is not a hunt
+       along the header. */
+    var d=document.getElementById('help');
+    if(d.open) d.close(); else d.showModal();
+    e.preventDefault(); return;
+  }
   else done=false;
   if(done){ e.preventDefault(); onHelm(); fields.forEach(function(f){ f(); }); }
 });
