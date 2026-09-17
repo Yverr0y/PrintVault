@@ -332,12 +332,15 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.7.1';
+var APP_VERSION = '0.7.2';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.7.2', [
+    'An alien among the example heads, for cosplay and for seeing what the sliders can do.'
+  ]],
   ['0.7.1', [
     'The name box suggests what to type instead of saying Unnamed at you.'
   ]],
@@ -1711,7 +1714,18 @@ function buildUI(){
     [['Small',{C:540,L:185,W:145,Hc:100,Hf:116,neck:44,noseP:18,noseW:31,noseD:48,chinP:8,chinW:48}],
      ['Medium',{C:570,L:196,W:152,Hc:106,Hf:122,neck:46,noseP:21,noseW:34,noseD:52,chinP:9,chinW:52}],
      ['Large',{C:600,L:206,W:158,Hc:112,Hf:128,neck:50,noseP:24,noseW:37,noseD:56,chinP:10,chinW:56}],
-     ['Child',{C:520,L:176,W:141,Hc:95,Hf:104,neck:38,noseP:15,noseW:28,noseD:42,chinP:6,chinW:45}]
+     ['Child',{C:520,L:176,W:141,Hc:95,Hf:104,neck:38,noseP:15,noseW:28,noseD:42,chinP:6,chinW:45}],
+     /* Not a person, and the only one here honest about it. It earns its place
+        by being the fastest way to see what the sliders actually do, since
+        every one is pushed somewhere a human head never goes.
+
+        The chin is doing the work. Shrinking the face alone just produced a
+        light bulb, because the profile the head is revolved from keeps its
+        rounded jaw whatever you do to the height. A chin projection of 16 mm
+        over a narrow 26 mm width is what gives it a point, and the point is
+        what reads as a face rather than an egg. */
+     ['Alien',{C:648,L:212,W:186,Hc:152,Hf:98,neck:22,ears:false,hair:0,
+               face:true,noseP:4,noseW:16,noseD:42,chinP:16,chinW:26}]
     ].forEach(function(p){
       btn(ex,p[0],function(){ Object.assign(S.head,p[1]); onHead(); buildUI(); },'sm');
     });
