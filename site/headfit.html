@@ -101,6 +101,9 @@ button,input,select{font:inherit;color:inherit}
 .bar{grid-column:1/-1; display:flex; align-items:center; gap:14px; padding:0 14px; height:54px;
   background:var(--panel); border-bottom:1px solid var(--line); position:relative; z-index:6}
 .brand{display:flex; align-items:baseline; gap:9px; margin-right:2px}
+.brand .home{display:flex; align-self:center; color:var(--ink2); text-decoration:none; border-radius:5px}
+.brand .home svg{width:21px; height:21px; display:block}
+.brand .home:hover{color:var(--ink)}
 .brand b{font-weight:700; letter-spacing:-.02em; font-size:17px}
 .brand span{color:var(--ink3); font-size:12px}
 .brand .ver{font-family:var(--mono); font-size:10.5px; letter-spacing:.02em; color:var(--ink3);
@@ -197,8 +200,17 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   .stage{grid-row:2} .panel{grid-row:3}
   .panel{border-right:0; border-top:1px solid var(--line); max-height:46dvh}
   .bar{height:50px; gap:9px; overflow-x:auto}
-  .brand span{display:none}
+  .brand span:not(.ver){display:none}
   .inspect{width:186px}
+}
+/* Narrow enough that the bar cannot hold its row. It scrolls sideways rather
+   than clipping, so nothing was ever lost, but a 50px strip with no scrollbar
+   is not somewhere anyone thinks to look: on a phone that quietly hid the
+   theme toggle, Start over, and Help, which is where the instructions are.
+   Wrapping costs one row of height and puts every control on screen. */
+@media (max-width:720px){
+  .bar{height:auto; flex-wrap:wrap; overflow-x:visible; padding-top:7px; padding-bottom:7px; row-gap:7px}
+  .bar .sp{display:none}   /* a flex spacer in a wrapping row just burns a line */
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -206,7 +218,19 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
 <body>
 <div class="app">
   <header class="bar">
-    <div class="brand"><b>Headfit</b><span>helmet and mask fit bench</span><span class="ver" id="ver"></span></div>
+    <!-- Headfit had no way out of it at all, not one link. Someone arriving
+         from a shared card was in a tool with no route to the thing it belongs
+         to, so the mark is the way back. -->
+    <div class="brand">
+      <a class="home" href="/" title="PrintVault">
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <path d="M16 2 3 9v14l13 7 13-7V9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".38"/>
+          <path d="M3 9l13 6.6L29 9M16 15.6V30" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".38"/>
+          <path d="M16 2 3 9l13 6.6L29 9z" fill="#ff7a2f"/>
+        </svg>
+      </a>
+      <b>Headfit</b><span>helmet and mask fit bench</span><span class="ver" id="ver"></span>
+    </div>
     <div class="seg" id="views">
       <button data-v="iso" aria-pressed="true">Iso</button>
       <button data-v="front">Front</button>
