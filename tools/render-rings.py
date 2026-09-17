@@ -59,7 +59,7 @@ def label_pad(mesh):
     return pts[pts[:, 1] > top - 0.01].mean(axis=0)
 
 def render(meshes, out, az=0.6, el=0.5, margin=0.90, focus=None, grid=True,
-           ao_depth=2.0):
+           ao_depth=2.0, size=None):
     """meshes is a list of (triangles, offset); one image, however many parts.
 
     ao_depth is how far, in millimetres, something has to stand above its
@@ -72,7 +72,8 @@ def render(meshes, out, az=0.6, el=0.5, margin=0.90, focus=None, grid=True,
     """
     tris = np.concatenate([rotate(m + np.asarray(o, float), az, el)
                            for m, o in meshes])
-    w, h = W * SS, H * SS
+    ow, oh = size or (W, H)
+    w, h = ow * SS, oh * SS
 
     if focus:
         c = rotate(np.asarray(focus[0], float), az, el)
@@ -145,7 +146,7 @@ def render(meshes, out, az=0.6, el=0.5, margin=0.90, focus=None, grid=True,
     shade = 1.0 - 0.42 * np.clip(occ / ao_depth, 0, 1)
     buf *= np.where(np.isfinite(zbuf), shade, 1.0)[:, :, None]
 
-    img = Image.fromarray(np.clip(buf, 0, 255).astype(np.uint8)).resize((W, H), Image.LANCZOS)
+    img = Image.fromarray(np.clip(buf, 0, 255).astype(np.uint8)).resize((ow, oh), Image.LANCZOS)
     img.save(out, 'PNG', optimize=True)
     return int(front.sum())
 
@@ -159,6 +160,24 @@ def main():
         print('no rings found, run make-rings.py first'); return
     mesh = {s: load_stl(os.path.join(src, 'head-ring-%dmm.stl' % s)) for s in sizes}
     mid  = 570 if 570 in sizes else sizes[len(sizes) // 2]
+
+    # 0. the cover, 3:4 portrait because that is the slot both listing sites
+    #    give it. Same idea as the set shot, stood on end: three columns and
+    #    five rows, and a lower camera so the rows stack up the frame instead
+    #    of running off the bottom of it. No ground plane here: the horizon
+    #    line cuts straight through the lower rings, and at the size a listing
+    #    thumbnail is actually seen it was only ever noise.
+    col, i, dz = (2, 3, 3, 3, 2), 0, 0.0
+    tall = []
+    for count in col:
+        row = sizes[i:i + count]; i += count
+        for c, sz in enumerate(row):
+            tall.append((mesh[sz], ((c - (count - 1) / 2) * 200.0, 0.0, dz)))
+        dz += 268.0
+    print('  00-cover          %d rings, %d faces' % (
+        len(sizes), render(tall, os.path.join(out, '00-cover.png'),
+                           az=0.0, el=0.62, margin=0.90, grid=False,
+                           size=(1500, 2000))))
 
     # 1. the set laid out, because the set is what gets posted. Not stacked:
     #    sizes this close cannot nest without the walls clashing, and thirteen
