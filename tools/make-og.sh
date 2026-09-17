@@ -9,12 +9,17 @@
 # this site gets deployed from. Do not reach for `convert` here: on Windows that
 # name belongs to the filesystem conversion tool, not ImageMagick.
 #
-# Only run this when og.svg has actually changed, or when og.png has gone
+# Only run this when the svg has actually changed, or when its png has gone
 # missing again. Chrome renders with whatever fonts this machine has, so a
 # needless re-render moves the type around slightly and produces a file two and
 # a half times the size, for a card that scrapers have already cached.
 #
-#   tools/make-og.sh    rewrites site/og.png from site/og.svg
+#   tools/make-og.sh              rewrites site/og.png from site/og.svg
+#   tools/make-og.sh og-headfit   rewrites site/og-headfit.png likewise
+#
+# Each page wants its own card. Headfit pointed at the main one for a while and
+# invited people to a helmet fit tool with a picture saying their STL folder was
+# a landfill.
 
 set -e
 
@@ -24,19 +29,20 @@ set -e
 # it maintains does not survive a fresh clone.
 SITEDIR=$(cd "$(dirname "$0")/../site" 2>/dev/null && pwd) ||
   { echo "cannot find the site folder next to $(dirname "$0")" >&2; exit 1; }
-[ -f "$SITEDIR/og.svg" ] ||
-  { echo "$SITEDIR has no og.svg to render" >&2; exit 1; }
+NAME=${1:-og}
+[ -f "$SITEDIR/$NAME.svg" ] ||
+  { echo "$SITEDIR has no $NAME.svg to render" >&2; exit 1; }
 cd "$SITEDIR"
 
 CHROME="/c/Program Files/Google/Chrome/Application/chrome.exe"
 [ -x "$CHROME" ] || CHROME="/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
-[ -x "$CHROME" ] || { echo "No Chrome or Edge found, cannot render og.png" >&2; exit 1; }
+[ -x "$CHROME" ] || { echo "No Chrome or Edge found, cannot render the card" >&2; exit 1; }
 
-# The size is not a guess: og.svg is authored at 1200x630 and index.html
-# declares those numbers in og:image:width and og:image:height.
+# The size is not a guess: the cards are authored at 1200x630 and the pages
+# declare those numbers in og:image:width and og:image:height.
 "$CHROME" --headless --disable-gpu --hide-scrollbars \
   --window-size=1200,630 \
-  --screenshot="$(pwd -W 2>/dev/null || pwd)/og.png" \
-  "file:///$(pwd -W 2>/dev/null || pwd)/og.svg" 2>/dev/null
+  --screenshot="$(pwd -W 2>/dev/null || pwd)/$NAME.png" \
+  "file:///$(pwd -W 2>/dev/null || pwd)/$NAME.svg" 2>/dev/null
 
-echo "og.png rewritten from og.svg"
+echo "$NAME.png rewritten from $NAME.svg"
