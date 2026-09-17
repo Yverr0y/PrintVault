@@ -332,12 +332,15 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.7.0';
+var APP_VERSION = '0.7.1';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.7.1', [
+    'The name box suggests what to type instead of saying Unnamed at you.'
+  ]],
   ['0.7.0', [
     'Name a head, and every file you save is named after it instead of after nothing.',
     'The name travels with a share link too.'
@@ -1689,9 +1692,14 @@ function buildUI(){
   var nameWrap=h('div','fld',b);
   h('label',null,nameWrap,'Whose head is this');
   var nameIn=h('input','nm',nameWrap);
-  nameIn.type='text'; nameIn.placeholder='Unnamed'; nameIn.maxLength=48;
+  /* An example rather than the word Unnamed. "Unnamed" describes the empty
+     state, which the empty box already does, and tells nobody what sort of
+     thing to type. The label asks whose head it is and the placeholder answers
+     it, which also quietly says an informal name is fine. */
+  nameIn.type='text'; nameIn.placeholder='Mine'; nameIn.maxLength=48;
   nameIn.value=S.name||'';
   nameIn.addEventListener('input',function(){ S.name=nameIn.value; persist(); refreshHud(); });
+  h('div','hint',nameWrap,'Names anything you save, so three heads in a downloads folder stay apart.');
 
   if(S.head.src==='measure'){
     h('div','hint',b,'Tape around the head just above the brow, then the two calliper spans. Help explains where each one goes.');
