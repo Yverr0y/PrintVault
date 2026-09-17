@@ -26,7 +26,10 @@ def load_stl(path):
     b = open(path, 'rb').read()
     n = struct.unpack('<I', b[80:84])[0]
     a = np.frombuffer(b[84:84 + 50 * n], dtype=np.uint8).reshape(n, 50)
-    return a[:, 12:48].copy().view('<f4').reshape(n, 3, 3).astype(np.float64)
+    v = a[:, 12:48].copy().view('<f4').reshape(n, 3, 3).astype(np.float64)
+    # The files are Z up, the way a slicer wants them. Turn them back to the
+    # Y up frame this renderer is written in.
+    return np.stack([v[..., 0], v[..., 2], -v[..., 1]], axis=-1)
 
 def rotate(v, az, el):
     ca, sa, ce, se = math.cos(az), math.sin(az), math.cos(el), math.sin(el)
