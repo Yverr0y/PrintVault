@@ -229,7 +229,7 @@ kbd{font:500 11px/1 var(--mono); border:1px solid var(--line2); border-bottom-wi
   <h3>How to use Headfit</h3>
   <p><b>1. Build your head.</b> Enter a tape measurement around your head just above the brow, plus front-to-back and side-to-side. Everything else has sensible defaults. If you already have a scan, load it instead.</p>
   <p><b>2. Bring in a helmet.</b> Drop an STL or OBJ anywhere on the viewport, or keep the generated shell to sanity-check the workflow. Move and rotate it until it sits where you'd wear it.</p>
-  <p><b>3. Check clearance.</b> Analyse fit paints the head by how much room there is: red means the shell passes through you. Switch it to <b>Mask seal</b> for a respirator or a face mask, where the goal is the opposite: a band of gentle press is what seals, a gap is the leak, and the readings cover only the part of your face the mask comes near. A seal needs a real face, so load a scan rather than using the measured head, which has no nose. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
+  <p><b>3. Check clearance.</b> Analyse fit paints the head by how much room there is: red means the shell passes through you. Switch it to <b>Mask seal</b> for a respirator or a face mask, where the goal is the opposite: a band of gentle press is what seals, a gap is the leak, and the readings cover only the part of your face the mask comes near. A seal needs a face, so switch on <b>Nose and chin</b> under Head, or better, load a scan. The built head is a rough approximation of a face and a scan is an actual one. Section cuts a plane through both parts and the slice inspector measures the tightest point in that plane.</p>
   <p><b>4. Print a ring.</b> A ring is a thin slice of the helmet's inside wall at one height. Print it flat in ten minutes and put it on your head before committing to an eight-hour print.</p>
   <p style="margin-top:14px"><kbd>drag</kbd> orbit &nbsp; <kbd>right-drag</kbd> pan &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>←→↑↓</kbd> nudge helmet &nbsp; <kbd>shift</kbd>+arrows rotate &nbsp; <kbd>[</kbd> <kbd>]</kbd> raise/lower</p>
   <p class="note" style="color:var(--ink3)">Exports are binary STL in millimetres. Measurements stay in this browser's local storage; nothing is uploaded.</p>
@@ -270,7 +270,10 @@ var S = {
   units:'mm',
   theme:'dark',
   head:{ src:'measure', C:570, L:196, W:152, link:true, Hc:106, Hf:122, neck:46,
-         ears:true, earP:19, earH:62, earL:33, hair:0, res:1 },
+         ears:true, earP:19, earH:62, earL:33, hair:0, res:1,
+         /* Off by default. A helmet clears the face anyway, and switching it on
+            for everyone would quietly move every existing fit reading. */
+         face:false, noseP:21, noseW:34, noseD:52, chinP:9, chinW:52 },
   helm:{ src:'shell', pad:10, thick:4.5, cutY:-32, rise:34,
          px:0, py:0, pz:0, rx:0, ry:0, rz:0, scale:100, opacity:55, wire:false, show:true,
          zup:false },
@@ -343,8 +346,14 @@ function headParams(){
   var hw = m.W/2, fz = m.L*0.465, bz = m.L*0.535;
   // scale the brow ring so its measured perimeter matches the tape measurement
   var per = ringPerim(hw,fz,bz), k = m.C/per;
+  /* Nose height arrives as millimetres below the brow, which is how you would
+     measure it, and becomes a t because that is what the profile speaks. Brow
+     is t=0 and the chin is t=-1, so brow-to-chin is the ruler. */
+  var tip = -Math.min(0.9, Math.max(0.15, (m.noseD||52)/Math.max(1,m.Hf)));
   return { hw:hw*k, fz:fz*k, bz:bz*k, Hc:m.Hc, Hf:m.Hf, neck:m.neck, hair:m.hair,
-           L:(fz+bz)*k, W:m.W*k, C:m.C };
+           L:(fz+bz)*k, W:m.W*k, C:m.C,
+           face:!!m.face, noseP:m.noseP||0, noseW:m.noseW||34, noseTip:tip,
+           chinP:m.chinP||0, chinW:m.chinW||52 };
 }
 var NF=2.32, NB=2.12; // superellipse exponents: flatter forehead, rounder occiput
 function ringXZ(th, fz, bz, hw){
@@ -365,9 +374,56 @@ function yFor(t,P){
   if(t>=-1) return t*P.Hf;
   return -P.Hf - ((-t)-1)*(P.neck/0.36);
 }
+/* ---------------------------------------------------------------- face
+   The head above is a lathe: every ring is a superellipse and every height is a
+   scale of it. That is a fair skull and a hopeless face, because a lathe cannot
+   have a nose. These push the front of a few rings forward instead.
+
+   Deliberately added inside hp rather than to the finished mesh. hpn works out
+   its normals by sampling hp either side of a point and crossing the tangents,
+   so a feature added here is lit, shaded and ray traced correctly for free.
+   Added to the mesh afterwards it would need its own normals and would still be
+   invisible to the fit analysis, which walks the head's vertices and normals. */
+function angOff(th){ var a=th%TAU; if(a>Math.PI) a-=TAU; if(a<-Math.PI) a+=TAU; return a; }
+function ease(x){ return x<=0?0:(x>=1?1:x*x*(3-2*x)); }
+/* 0 at the edges, 1 in the middle, smooth at both ends */
+function hump(u){ return u<=0||u>=1 ? 0 : Math.pow(Math.sin(Math.PI*u),2); }
+
+function faceZ(th,t,P){
+  var z=0, a=Math.abs(angOff(th));
+
+  if(P.noseP>0){
+    /* Width is given in mm across the base of the nose, turned into the angle
+       that spans on this particular head, so a wide face does not get a
+       proportionally wider nose. */
+    var half = Math.asin(Math.min(0.96, Math.max(0.02, (P.noseW/2)/P.hw)));
+    if(a < half){
+      var across = hump(0.5 + 0.5*(1 - a/half));   // full at the centre line
+      var top = 0.06, tip = P.noseTip, bot = tip - 0.16;
+      if(t < top && t > bot){
+        var u = (top - t)/(top - bot), pk = (top - tip)/(top - bot);
+        /* Rises from the bridge to the tip, then tucks back under sharply,
+           which is what makes a nose read as a nose and not a lump. */
+        var along = u < pk ? ease(u/pk) : 1 - ease((u-pk)/Math.max(1e-4,1-pk));
+        z += P.noseP * across * along;
+      }
+    }
+  }
+
+  if(P.chinP>0){
+    var chalf = Math.asin(Math.min(0.96, Math.max(0.02, (P.chinW/2)/P.hw)));
+    if(a < chalf){
+      var cAcross = hump(0.5 + 0.5*(1 - a/chalf));
+      var cTop=-0.74, cBot=-1.08;
+      if(t < cTop && t > cBot) z += P.chinP * cAcross * hump((cTop - t)/(cTop - cBot));
+    }
+  }
+  return z;
+}
+
 function hp(th,t,P){
   var s=profile(t), q=ringXZ(th, P.fz*s[1], P.bz*s[2], P.hw*s[0]);
-  return [q[0], yFor(t,P), q[1]];
+  return [q[0], yFor(t,P), P.face ? q[1] + faceZ(th,t,P) : q[1]];
 }
 /* surface point plus outward normal */
 function hpn(th,t,P,out){
@@ -1310,6 +1366,23 @@ function buildUI(){
         set:function(v){ S.head.earP=v; },on:onHead});
       addSlider(b,{label:'Ear height',unit:'mm',min:40,max:90,step:0.5,get:function(){return S.head.earH;},
         set:function(v){ S.head.earH=v; },on:onHead});
+    }
+    /* A nose matters for a mask and not for a helmet, so it stays folded away
+       until asked for rather than adding four sliders everyone has to scroll
+       past. */
+    addToggle(b,'Nose and chin',function(){return S.head.face;},function(v){ S.head.face=v; onHead(); buildUI(); });
+    if(S.head.face){
+      h('div','hint',b,'Rough, and only worth setting for a mask seal. A tape measure cannot really describe a face, so a scan beats this whenever you have one.');
+      addSlider(b,{label:'Nose sticks out',unit:'mm',min:0,max:40,step:0.5,get:function(){return S.head.noseP;},
+        set:function(v){ S.head.noseP=v; },on:onHead});
+      addSlider(b,{label:'Nose width',unit:'mm',min:16,max:60,step:0.5,get:function(){return S.head.noseW;},
+        set:function(v){ S.head.noseW=v; },on:onHead});
+      addSlider(b,{label:'Brow to nose tip',unit:'mm',min:25,max:90,step:0.5,get:function(){return S.head.noseD;},
+        set:function(v){ S.head.noseD=v; },on:onHead});
+      addSlider(b,{label:'Chin sticks out',unit:'mm',min:0,max:30,step:0.5,get:function(){return S.head.chinP;},
+        set:function(v){ S.head.chinP=v; },on:onHead});
+      addSlider(b,{label:'Chin width',unit:'mm',min:25,max:90,step:0.5,get:function(){return S.head.chinW;},
+        set:function(v){ S.head.chinW=v; },on:onHead});
     }
     var sel=h('select',null,b); ['Draft','Standard','Fine'].forEach(function(n,i){
       var o=h('option',null,sel,n+' mesh'); o.value=i; });
