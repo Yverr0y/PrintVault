@@ -332,12 +332,19 @@ var TAU = Math.PI*2;
    changes against. Everything before it is in the repository history rather
    than pretended to be a release. Bump it when the tool changes, not when the
    page is merely redeployed. */
-var APP_VERSION = '0.7.4';
+var APP_VERSION = '0.8.0';
 
 /* Newest first. 0.1.0 is where versioning started rather than where the tool
    did, so it covers everything that existed by then in one entry instead of
    inventing releases that never happened. */
 var NOTES = [
+  ['0.8.0', [
+    'The head is shaped like a head rather than an egg. Its cross section changes with height now, so the skull stays rounded and the jaw goes flat across the front with a corner at the back, which one exponent for the whole head could never do.',
+    'A brow ridge, eye sockets and the slight hollow at the temples, under Nose and chin. One slider, and zero turns it off.',
+    'Ears lean back, the way ears do.',
+    'Fixed: the nose and the chin were inside out across their width, flat down the centre line and full at the edges. A nose has been a horseshoe this whole time.',
+    'Readings at the brow are unchanged, because the ring the tape measurement calibrates is pinned to its old shape on purpose. Below it, a fit reading can move a little.'
+  ]],
   ['0.7.4', [
     'Switching to inches no longer leaves the model height reading millimetres.'
   ]],
@@ -396,7 +403,7 @@ var S = {
          ears:true, earP:19, earH:62, earL:33, hair:0, res:1,
          /* Off by default. A helmet clears the face anyway, and switching it on
             for everyone would quietly move every existing fit reading. */
-         face:false, noseP:21, noseW:34, noseD:52, chinP:9, chinW:52 },
+         face:false, noseP:21, noseW:34, noseD:52, chinP:9, chinW:52, browP:5 },
   helm:{ src:'shell', pad:10, thick:4.5, cutY:-32, rise:34,
          px:0, py:0, pz:0, rx:0, ry:0, rz:0, scale:100, opacity:55, wire:false, show:true,
          zup:false },
@@ -482,16 +489,44 @@ function headParams(){
   return { hw:hw*k, fz:fz*k, bz:bz*k, Hc:m.Hc, Hf:m.Hf, neck:m.neck, hair:m.hair,
            L:(fz+bz)*k, W:m.W*k, C:m.C,
            face:!!m.face, noseP:m.noseP||0, noseW:m.noseW||34, noseTip:tip,
-           chinP:m.chinP||0, chinW:m.chinW||52 };
+           chinP:m.chinP||0, chinW:m.chinW||52, browP:m.browP||0 };
 }
 var NF=2.32, NB=2.12; // superellipse exponents: flatter forehead, rounder occiput
-function ringXZ(th, fz, bz, hw){
+/* The cross section is not the same shape all the way up, and using one
+   exponent for the whole head is the main reason a lathe reads as an egg. A
+   cranium is close to an ellipse. A jaw is closer to a rounded box, flat across
+   the front with a corner at the gonial angle, and no amount of scaling an
+   ellipse produces a corner.
+
+   t=0 is pinned to NF and NB deliberately. headParams scales the entire head so
+   the perimeter of the ring at t=0 matches the tape measurement, so that one
+   ring has to keep exactly the shape that sum was worked out on. Everything
+   above and below it is free to change. */
+var KEYN = [
+  [-1.36, 2.20, 2.20],   // neck, round again
+  [-1.00, 2.58, 2.40],   // chin
+  [-0.70, 2.95, 2.62],   // the corner of the jaw
+  [-0.35, 2.55, 2.32],   // cheekbones
+  [ 0.00, NF,   NB   ],  // brow: pinned, the tape measurement lives here
+  [ 0.45, 2.20, 2.10],
+  [ 1.00, 2.05, 2.05]    // crown, very nearly an ellipse
+];
+function expFor(t){
+  t = clamp(t,-1.36,1);
+  var i=0; while(i<KEYN.length-2 && KEYN[i+1][0]<t) i++;
+  var k0=KEYN[i], k1=KEYN[i+1];
+  var u = smooth(clamp((t-k0[0])/(k1[0]-k0[0]),0,1));
+  return [lerp(k0[1],k1[1],u), lerp(k0[2],k1[2],u)];
+}
+function ringXZ(th, fz, bz, hw, nf, nb){
   var s=Math.sin(th), c=Math.cos(th);
-  var b = c>=0?fz:bz, n = c>=0?NF:NB;
+  var b = c>=0?fz:bz, n = c>=0 ? (nf===undefined?NF:nf) : (nb===undefined?NB:nb);
   var x = hw*Math.sign(s)*Math.pow(Math.abs(s),2/n);
   var z = b*Math.sign(c)*Math.pow(Math.abs(c),2/n);
   return [x,z];
 }
+/* Called only to calibrate the brow ring against the tape, so it wants the
+   brow's exponents and takes them by leaving them out. */
 function ringPerim(hw,fz,bz){
   var n=256, p=0, px=0, pz=0;
   for(var i=0;i<=n;i++){ var q=ringXZ(i/n*TAU,fz,bz,hw);
@@ -517,6 +552,14 @@ function angOff(th){ var a=th%TAU; if(a>Math.PI) a-=TAU; if(a<-Math.PI) a+=TAU; 
 function ease(x){ return x<=0?0:(x>=1?1:x*x*(3-2*x)); }
 /* 0 at the edges, 1 in the middle, smooth at both ends */
 function hump(u){ return u<=0||u>=1 ? 0 : Math.pow(Math.sin(Math.PI*u),2); }
+/* 1 at the centre of a feature, feathering to 0 at its half width, and 0
+   outside. Worth a name of its own: the nose and the chin were both written
+   inline with the argument the wrong way round, which put zero down the centre
+   line and full strength at the edges. That is a horseshoe, not a nose, and it
+   is the sort of mistake that never announces itself. */
+function near(a,c,w){ var d=Math.abs(a-c); return d<w ? hump(0.5+0.5*(d/w)) : 0; }
+/* 1 in the middle of a height band, 0 at either end of it */
+function span(t,top,bot){ return (t<top && t>bot) ? hump((top-t)/(top-bot)) : 0; }
 
 function faceZ(th,t,P){
   var z=0, a=Math.abs(angOff(th));
@@ -527,7 +570,7 @@ function faceZ(th,t,P){
        proportionally wider nose. */
     var half = Math.asin(Math.min(0.96, Math.max(0.02, (P.noseW/2)/P.hw)));
     if(a < half){
-      var across = hump(0.5 + 0.5*(1 - a/half));   // full at the centre line
+      var across = near(a, 0, half);               // full at the centre line
       var top = 0.06, tip = P.noseTip, bot = tip - 0.16;
       if(t < top && t > bot){
         var u = (top - t)/(top - bot), pk = (top - tip)/(top - bot);
@@ -542,17 +585,47 @@ function faceZ(th,t,P){
   if(P.chinP>0){
     var chalf = Math.asin(Math.min(0.96, Math.max(0.02, (P.chinW/2)/P.hw)));
     if(a < chalf){
-      var cAcross = hump(0.5 + 0.5*(1 - a/chalf));
+      var cAcross = near(a, 0, chalf);
       var cTop=-0.74, cBot=-1.08;
       if(t < cTop && t > cBot) z += P.chinP * cAcross * hump((cTop - t)/(cTop - cBot));
     }
   }
+
+  if(P.browP>0){
+    /* A brow ridge, and the two shallow dishes either side of the nose that the
+       eyes sit in. Both live below t=0 on purpose. t=0 is the ring whose
+       perimeter is calibrated against the tape, and pushing it out would leave
+       the head disagreeing with the measurement it was built from. */
+    z += 1.00*P.browP * near(a, 0, 1.00) * span(t, -0.01, -0.21);
+    z -= 0.70*P.browP * near(a, 0.46, 0.30) * span(t, -0.11, -0.37);
+  }
   return z;
 }
 
+/* Sideways rather than forwards. faceZ can only move a point along +z, which is
+   straight out at the front of the head and flat along the surface at the
+   sides, so a hollow at the temple has to be a radial move or it does nothing
+   at all. */
+function faceR(th,t,P){
+  if(!(P.browP>0)) return 0;
+  var a=Math.abs(angOff(th));
+  /* The temple. A lathe leaves this convex; on a real head it is slightly
+     hollow, which is one of those things the eye reads without naming. */
+  return -0.55*P.browP * near(a, 1.26, 0.34) * span(t, 0.03, -0.31);
+}
+
 function hp(th,t,P){
-  var s=profile(t), q=ringXZ(th, P.fz*s[1], P.bz*s[2], P.hw*s[0]);
-  return [q[0], yFor(t,P), P.face ? q[1] + faceZ(th,t,P) : q[1]];
+  var s=profile(t), e=expFor(t);
+  var q=ringXZ(th, P.fz*s[1], P.bz*s[2], P.hw*s[0], e[0], e[1]);
+  var x=q[0], z=q[1];
+  if(P.face){
+    /* Radial first, measured off the untouched ring, so a hollow at the side is
+       not worked out from a point a nose has already moved. */
+    var r=faceR(th,t,P);
+    if(r){ var L=Math.hypot(x,z)||1; x+=x/L*r; z+=z/L*r; }
+    z += faceZ(th,t,P);
+  }
+  return [x, yFor(t,P), z];
 }
 /* surface point plus outward normal */
 function hpn(th,t,P,out){
@@ -635,13 +708,19 @@ function mergeRaw(a,b){
   for(var j=0;j<b.idx.length;j++) a.idx.push(b.idx[j]+off);
   return a;
 }
-function ellipsoidRaw(cx,cy,cz,rx,ry,rz,cols,rows){
+/* tilt is optional, in radians, about the X axis and about the centre. Only the
+   ears use it, and only because an ear that stands perfectly upright is the
+   giveaway on an otherwise passable head. */
+function ellipsoidRaw(cx,cy,cz,rx,ry,rz,cols,rows,tilt){
+  var ct = tilt ? Math.cos(tilt) : 1, st = tilt ? Math.sin(tilt) : 0;
   var R=[];
   for(var j=0;j<=rows;j++){
     var ph=j/rows*Math.PI, row=[];
     for(var i=0;i<cols;i++){
       var th=i/cols*TAU;
-      row.push(cx+rx*Math.sin(ph)*Math.cos(th), cy+ry*Math.cos(ph), cz+rz*Math.sin(ph)*Math.sin(th));
+      var px=rx*Math.sin(ph)*Math.cos(th), py=ry*Math.cos(ph), pz=rz*Math.sin(ph)*Math.sin(th);
+      if(tilt){ var y2=py*ct-pz*st; pz=py*st+pz*ct; py=y2; }
+      row.push(cx+px, cy+py, cz+pz);
     }
     R.push(row);
   }
@@ -670,8 +749,11 @@ function buildHead(){
     [Math.PI/2, -Math.PI/2].forEach(function(th){
       hpn(th, -0.22, P, ec);
       var zo = -0.10*P.L;
+      /* Leant back about eighteen degrees. A real ear is not vertical: the top
+         sits further back than the lobe, and the front of the head is +z, so
+         the top has to travel towards -z. */
       mergeRaw(raw, ellipsoidRaw(ec[0], ec[1], ec[2]+zo,
-        m.earP, m.earH/2, m.earL/2, 14, 9));
+        m.earP, m.earH/2, m.earL/2, 14, 9, -0.32));
     });
   }
   var g = toGeom(raw);
@@ -1722,10 +1804,10 @@ function buildUI(){
        plausible head you can pull towards your own. Deliberately labelled as
        starting points: these are made up, not anybody's measurements. */
     var ex=h('div','rowbtn',b);
-    [['Small',{C:540,L:185,W:145,Hc:100,Hf:116,neck:44,noseP:18,noseW:31,noseD:48,chinP:8,chinW:48}],
-     ['Medium',{C:570,L:196,W:152,Hc:106,Hf:122,neck:46,noseP:21,noseW:34,noseD:52,chinP:9,chinW:52}],
-     ['Large',{C:600,L:206,W:158,Hc:112,Hf:128,neck:50,noseP:24,noseW:37,noseD:56,chinP:10,chinW:56}],
-     ['Child',{C:520,L:176,W:141,Hc:95,Hf:104,neck:38,noseP:15,noseW:28,noseD:42,chinP:6,chinW:45}],
+    [['Small',{C:540,L:185,W:145,Hc:100,Hf:116,neck:44,noseP:18,noseW:31,noseD:48,chinP:8,chinW:48,browP:4.5}],
+     ['Medium',{C:570,L:196,W:152,Hc:106,Hf:122,neck:46,noseP:21,noseW:34,noseD:52,chinP:9,chinW:52,browP:5}],
+     ['Large',{C:600,L:206,W:158,Hc:112,Hf:128,neck:50,noseP:24,noseW:37,noseD:56,chinP:10,chinW:56,browP:5.5}],
+     ['Child',{C:520,L:176,W:141,Hc:95,Hf:104,neck:38,noseP:15,noseW:28,noseD:42,chinP:6,chinW:45,browP:3}],
      /* Not a person, and the only one here honest about it. It earns its place
         by being the fastest way to see what the sliders actually do, since
         every one is pushed somewhere a human head never goes.
@@ -1736,7 +1818,7 @@ function buildUI(){
         over a narrow 26 mm width is what gives it a point, and the point is
         what reads as a face rather than an egg. */
      ['Alien',{C:648,L:212,W:186,Hc:152,Hf:98,neck:22,ears:false,hair:0,
-               face:true,noseP:4,noseW:16,noseD:42,chinP:16,chinW:26}]
+               face:true,noseP:4,noseW:16,noseD:42,chinP:16,chinW:26,browP:0}]
     ].forEach(function(p){
       btn(ex,p[0],function(){ Object.assign(S.head,p[1]); onHead(); buildUI(); },'sm');
     });
@@ -1781,6 +1863,8 @@ function buildUI(){
         set:function(v){ S.head.chinP=v; },on:onHead});
       addSlider(b,{label:'Chin width',unit:'mm',min:25,max:90,step:0.5,get:function(){return S.head.chinW;},
         set:function(v){ S.head.chinW=v; },on:onHead});
+      addSlider(b,{label:'Brow and temples',unit:'mm',min:0,max:14,step:0.5,get:function(){return S.head.browP;},
+        set:function(v){ S.head.browP=v; },on:onHead});
     }
     var sel=h('select',null,b); ['Draft','Standard','Fine'].forEach(function(n,i){
       var o=h('option',null,sel,n+' mesh'); o.value=i; });
@@ -2031,7 +2115,12 @@ function centreHelmet(){
    seventy characters. The h1 prefix is there so a later change of fields can be
    told apart from this one instead of quietly loading nonsense. */
 var SHARE_KEYS = ['C','L','W','Hc','Hf','neck','ears','earP','earH','earL','hair','res',
-                  'face','noseP','noseW','noseD','chinP','chinW'];
+                  'face','noseP','noseW','noseD','chinP','chinW','browP'];
+/* The field list as it stood when links were tagged h1, kept so that the ones
+   already pasted into chats go on working. browP is appended rather than
+   inserted for exactly this reason: an old link decodes against this shorter
+   list and simply leaves browP at its default. */
+var SHARE_KEYS_V1 = SHARE_KEYS.slice(0, SHARE_KEYS.length-1);
 /* The same bounds the sliders enforce, copied rather than invented: a link
    that set a value beyond a slider's reach would leave the model holding one
    number and the panel showing another, with no way to drag back to it. A link
@@ -2039,7 +2128,8 @@ var SHARE_KEYS = ['C','L','W','Hc','Hf','neck','ears','earP','earH','earL','hair
    trusted into the geometry. */
 var SHARE_RANGE = {C:[420,700], L:[150,250], W:[110,200], Hc:[60,160], Hf:[70,180], neck:[0,90],
                    ears:[0,1], earP:[5,40], earH:[40,90], earL:[5,120], hair:[0,30], res:[0,2],
-                   face:[0,1], noseP:[0,40], noseW:[16,60], noseD:[25,90], chinP:[0,30], chinW:[25,90]};
+                   face:[0,1], noseP:[0,40], noseW:[16,60], noseD:[25,90], chinP:[0,30], chinW:[25,90],
+                   browP:[0,14]};
 
 function encodeHead(){
   var body = SHARE_KEYS.map(function(k){
@@ -2051,21 +2141,23 @@ function encodeHead(){
      it looks: a comma in a name would otherwise split into a field of its own
      and the whole thing would decode as the wrong length and be thrown away. */
   var n = String(S.name||'').slice(0,48);
-  return 'h1,' + body + (n ? ',' + encodeURIComponent(n) : '');
+  return 'h2,' + body + (n ? ',' + encodeURIComponent(n) : '');
 }
 function decodeHead(str){
   if(!str) return null;
   var p = String(str).split(',');
-  if(p.shift() !== 'h1') return null;
-  var named = p.length === SHARE_KEYS.length + 1;
-  if(p.length !== SHARE_KEYS.length && !named) return null;
+  var tag = p.shift();
+  var keys = tag==='h2' ? SHARE_KEYS : (tag==='h1' ? SHARE_KEYS_V1 : null);
+  if(!keys) return null;
+  var named = p.length === keys.length + 1;
+  if(p.length !== keys.length && !named) return null;
   var out = {};
   if(named){
     try{ out._name = decodeURIComponent(p.pop()).slice(0,48); }
     catch(e){ return null; }   /* a mangled escape is a mangled link */
   }
-  for(var i=0;i<SHARE_KEYS.length;i++){
-    var k = SHARE_KEYS[i], n = Number(p[i]);
+  for(var i=0;i<keys.length;i++){
+    var k = keys[i], n = Number(p[i]);
     if(!isFinite(n)) return null;
     var r = SHARE_RANGE[k];
     n = Math.min(r[1], Math.max(r[0], n));
