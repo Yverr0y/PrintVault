@@ -14,7 +14,7 @@ use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_updater::{Error as UpdaterError, UpdaterExt};
 use walkdir::WalkDir;
 
 #[derive(Serialize)]
@@ -935,10 +935,18 @@ async fn run_update_check(app: &tauri::AppHandle) -> Result<Option<String>, Stri
         .updater()
         .map_err(|e| format!("updater unavailable: {}", e))?;
 
-    let found = updater
-        .check()
-        .await
-        .map_err(|e| format!("could not reach the update endpoint: {}", e))?;
+    let found = updater.check().await.map_err(|e| match e {
+        // The endpoint answered and the manifest parsed. This release simply
+        // carries no build for the platform doing the asking, which is what
+        // happens whenever a release goes out without one of the three. Worth
+        // naming precisely, because the generic wording sends someone off
+        // checking their network for a problem that is not there, and the
+        // honest answer is that there is nothing for them to install.
+        UpdaterError::TargetsNotFound(_) | UpdaterError::TargetNotFound(_) => {
+            "this release has no build for your platform yet".to_string()
+        }
+        other => format!("could not reach the update endpoint: {}", other),
+    })?;
 
     let update = match found {
         Some(u) => u,
