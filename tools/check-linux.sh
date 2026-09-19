@@ -26,8 +26,17 @@ REF=${1:-$(git rev-parse --abbrev-ref HEAD)}
 # C:/Program Files/Git/mnt/c and is not obvious from the error.
 export MSYS_NO_PATHCONV=1
 
-# /c/Users/... here is /mnt/c/Users/... over there.
-WINREPO=$(pwd | sed 's|^/\([a-z]\)/|/mnt/\1/|')
+# /c/Users/... here is /mnt/c/Users/... over there. Both spellings have to be
+# handled: from a shell pwd gives /c/Users/..., but when git runs this from a
+# hook it gives C:/Users/..., and a path carrying a colon reaches git on the far
+# side as an scp-style remote. The symptom is "ssh: Could not resolve hostname
+# c", which names nothing you would go looking at.
+here=$(cygpath -u "$(pwd)" 2>/dev/null || pwd)
+case "$here" in
+  /mnt/*)      WINREPO=$here ;;
+  /[A-Za-z]/*) WINREPO="/mnt/$(printf '%s' "$here" | cut -c2 | tr 'A-Z' 'a-z')${here#/?}" ;;
+  *)           WINREPO=$here ;;
+esac
 
 command -v wsl.exe >/dev/null 2>&1 || { echo "wsl.exe not found" >&2; exit 1; }
 
@@ -43,18 +52,24 @@ WINREPO=$1; CLONE=$(eval echo "$2"); REF=$3
 # rustup lives in ~/.cargo, which a non-login shell does not have on PATH.
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
+# A setup problem and a compile failure are different answers, and one exit
+# code cannot tell them apart. 2 means the check could not run.
+fail_setup(){ printf '\n!! %s\n' "$*" >&2; exit 2; }
+
+[ -d "$WINREPO" ] || fail_setup "$WINREPO is not visible from inside WSL"
+
 if [ ! -d "$CLONE/.git" ]; then
   # Deliberately a clone into the ext4 filesystem rather than building in
   # place on /mnt/c. Cargo touches thousands of small files and every one of
   # them would cross the 9p boundary; it is the difference between minutes
   # and most of an hour.
   echo "==> First run: cloning into $CLONE"
-  git clone --quiet "$WINREPO" "$CLONE"
+  git clone --quiet "$WINREPO" "$CLONE" || fail_setup "clone from $WINREPO failed"
 fi
 
-cd "$CLONE"
+cd "$CLONE" || fail_setup "$CLONE is not there"
 git remote set-url origin "$WINREPO"
-git fetch --quiet origin "$REF"
-git checkout --quiet -B "$REF" FETCH_HEAD
+git fetch --quiet origin "$REF" || fail_setup "could not fetch $REF from $WINREPO"
+git checkout --quiet -B "$REF" FETCH_HEAD || fail_setup "could not check out $REF"
 exec tools/linux-check.sh
 REMOTE
