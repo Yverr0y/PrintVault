@@ -5990,7 +5990,19 @@ const Dupes = {
     return String(m.name||'')
       .toLowerCase()
       .replace(/[_+]+/g,' ')
-      .replace(/\b(?:\d{6,}|[a-z0-9]{6}\d*)\b/g,' ')
+      /* Download ids, not words. The second half of this used to be
+         [a-z0-9]{6}\d*, which matches any six character word, so "statue",
+         "dragon", "helmet", "bottle" and "holder" were all being deleted out
+         of model names. Names made of nothing but six letter words came out
+         empty and fell through the length guard below, which took them out of
+         duplicate checking altogether, and unrelated ones collided: "Cool
+         Dragon Thing" and "Cool Holder Thing" both reduced to "cool thing".
+         An id is six or more characters carrying both a digit and a letter,
+         which a word never is. Erring towards keeping things: leaving an id in
+         means two copies of a model fail to group, while stripping a word
+         means two different models are offered up as one, and the second is
+         the one that loses files. */
+      .replace(/\b(?:\d{6,}|(?=[a-z0-9]{6,}\b)(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]+)\b/g,' ')
       .replace(/\b(?:copy|final|v\d+|fan art|no ams|multiparts?|stls?|3mf|gcode|files?|model files|remix|updated|new|old|\(\d+\))\b/g,' ')
       .replace(/[^a-z0-9 ]+/g,' ')
       .replace(/\s+/g,' ').trim();
