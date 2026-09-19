@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# One-time provisioning for the Linux box that runs cargo check.
+# One-time provisioning for the Linux environment that runs cargo check.
 #
-# Run this ON the VPS, not from here. It installs what the Rust shell needs to
+# Run this INSIDE that environment: a WSL distro, a VM, or a remote box. It is
+# the same job either way. It installs what the Rust shell needs to
 # compile on Linux and nothing else: no installer bundling, no signing keys, no
 # deploy credentials. If this box is later compromised the worst it holds is a
 # checkout of a public repo.
@@ -16,7 +17,7 @@ set -euo pipefail
 say(){ printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 die(){ printf '\n\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
 
-command -v apt-get >/dev/null 2>&1 || die "This expects a Debian or Ubuntu box; adapt the package names for anything else."
+command -v apt-get >/dev/null 2>&1 || die "This expects Debian or Ubuntu; adapt the package names for anything else."
 
 # The five that the Check workflow installs. webkit2gtk is the one that matters
 # and the one whose package name keeps moving between releases: 4.1 is what
@@ -63,4 +64,5 @@ echo "  rustc:  $(command -v rustc >/dev/null 2>&1 && rustc --version || echo 'n
 echo "  cargo:  $(command -v cargo >/dev/null 2>&1 && cargo --version || echo 'not on PATH, open a new shell')"
 echo "  node:   $(node --version 2>/dev/null || echo missing)"
 echo
-echo "Next: put a checkout somewhere and run tools/vps-check.sh from inside it."
+echo "Next: put a checkout somewhere native to this filesystem and run"
+ echo "tools/linux-check.sh from inside it. Not on /mnt/c under WSL: see that script."

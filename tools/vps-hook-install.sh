@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Sets up a push target on the Linux box that compiles what you send it.
 #
-# Run this ON the VPS, once, after vps-setup.sh. Afterwards:
+# Only for a remote box reached over SSH. WSL does not need it: there is no
+# sshd to push to, so tools/check-linux.sh drives the check directly instead.
+#
+# Run this ON the VPS, once, after linux-setup.sh. Afterwards:
 #
 #   git remote add vps <user>@<host>:printvault.git     (on your machine, once)
 #   git push vps main
@@ -52,10 +55,10 @@ while read -r _old new ref; do
   git --git-dir="$BARE" --work-tree="$WORK" checkout -f "$new" -- 2>/dev/null \
     || git --git-dir="$BARE" --work-tree="$WORK" checkout -f "$new"
 
-  if [ -x "$WORK/tools/vps-check.sh" ]; then
+  if [ -x "$WORK/tools/linux-check.sh" ]; then
     # The check cds to its own repo root, so it does not care where it is run
     # from. Output streams back through the push as remote: lines.
-    if "$WORK/tools/vps-check.sh"; then
+    if "$WORK/tools/linux-check.sh"; then
       printf '\n==> OK, %s compiles on Linux\n\n' "${new:0:9}"
     else
       printf '\n'
@@ -65,7 +68,7 @@ while read -r _old new ref; do
       printf '!! ============================================\n\n'
     fi
   else
-    printf '!! tools/vps-check.sh is missing or not executable in %s\n' "$WORK"
+    printf '!! tools/linux-check.sh is missing or not executable in %s\n' "$WORK"
   fi
 done
 HOOK
