@@ -1,0 +1,9 @@
+# Shell scripts run on Linux and on the Hostinger box, never on Windows.
+# core.autocrlf is on here, so without this git rewrites them to CRLF on the
+# next checkout and they fail on the far end with "bad interpreter: ^M", which
+# names neither the file nor the real problem.
+*.sh text eol=lf
+
+# Same reasoning: Apache reads this, and it is deployed as-is.
+.htaccess text eol=lf
+source.htaccess text eol=lf
