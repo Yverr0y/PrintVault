@@ -5995,13 +5995,41 @@ const Dupes = {
       .replace(/[^a-z0-9 ]+/g,' ')
       .replace(/\s+/g,' ').trim();
   },
+  /* Which format a model actually is, weighed by bytes rather than by file
+     count: one small stl sitting beside a big 3mf should not make the whole
+     model an stl. Empty when there is no mesh at all, which leaves those
+     grouping on the name alone the way they always did. */
+  formatOf(m, byModel){
+    const bytes = new Map();
+    for(const f of (byModel.get(m.id) || [])){
+      if(f.kind !== 'mesh') continue;
+      bytes.set(f.ext, (bytes.get(f.ext) || 0) + (f.size || 0));
+    }
+    let best = '', most = -1;
+    bytes.forEach((n, ext)=>{ if(n > most){ most = n; best = ext; } });
+    return best;
+  },
   modelGroups(){
+    const byModel = new Map();
+    for(const f of Store.files){
+      if(!byModel.has(f.modelId)) byModel.set(f.modelId, []);
+      byModel.get(f.modelId).push(f);
+    }
     const by = new Map();
     for(const m of Store.models){
       const k = Dupes.modelKey(m);
       if(k.length < 4) continue;
-      if(!by.has(k)) by.set(k, []);
-      by.get(k).push(m);
+      /* The same model in two formats is not the same model twice. modelKey
+         takes "stl" and "3mf" out of the name on purpose, so that "Dragon STL"
+         groups with "Dragon", and the cost of that was "Dragon STL" and
+         "Dragon 3MF" landing on one key and being offered up as a copy to
+         delete. Keying on the format as well keeps those apart, and reads it
+         off the files rather than the folder name, which is the part that
+         lies. A model holding both formats has one dominant format and still
+         groups with another copy of itself. */
+      const kk = k + '#' + Dupes.formatOf(m, byModel);
+      if(!by.has(kk)) by.set(kk, []);
+      by.get(kk).push(m);
     }
     const out = [];
     by.forEach((list,k)=>{
