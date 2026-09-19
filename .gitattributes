@@ -4,6 +4,10 @@
 # names neither the file nor the real problem.
 *.sh text eol=lf
 
+# Git hooks have no extension and are run by bash, so a CRLF one fails on the
+# shebang with an error that names neither.
+.githooks/* text eol=lf
+
 # Same reasoning: Apache reads this, and it is deployed as-is.
 .htaccess text eol=lf
 source.htaccess text eol=lf
