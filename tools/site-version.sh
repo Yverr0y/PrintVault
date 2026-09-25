@@ -129,7 +129,7 @@ cp "$PAGE" "$REAL"
 echo "   $REAL updated"
 
 if [ "$DEPLOY" = 1 ]; then
-  say "Deploying $PAGE"
+  say "Deploying $REAL"
   scp -i "$KEY" -P "$PORT" "$REAL" "$HOST:$ROOT/index.html" || die "upload failed"
   live=$(curl -s "$SITE/?cb=$$" | grep -c "PrintVault_${VER}_" || true)
   [ "${live:-0}" -gt 0 ] || die "the live page is not serving $VER links yet"
