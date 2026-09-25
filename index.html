@@ -455,7 +455,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
  * Copyright (C) 2026 magikh0e
  * License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html)
  */
-const APP_VERSION = '0.2.28';
+const APP_VERSION = '0.2.29';
 
 /* ============================================================
    U — utilities
@@ -7468,6 +7468,10 @@ const Keys = {
 
 const WhatsNew = {
   notes: [
+    ['0.2.29', [
+      'A model you have as STLs and again as a 3MF is two formats of one thing, not a duplicate. It used to offer one of them up for deletion.',
+      'Duplicate checking no longer deletes six letter words out of model names. Anything called Dragon, Statue, Helmet or Bottle Opener was being skipped entirely, and unrelated models were being grouped as one.'
+    ]],
     ['0.2.28', [
       'A finished print takes itself off the queue, and a run of six counts down as it goes.',
       'Printing the same file twice in a day is logged twice. Only the first one used to count.',
