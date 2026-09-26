@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "printvault-site",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-m", "http.server", "9124", "--directory", "site"],
+      "port": 9124
+    },
+    {
+      "name": "printvault-app",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-m", "http.server", "9123"],
+      "port": 9123
+    }
+  ]
+}
