@@ -6577,6 +6577,32 @@ const Settings = {
         '<button class="b" onclick="PV.Settings.pickSlicer()">'+I.plus+' Add a slicer</button></div>';
     }
 
+    /* Headfit is a separate tool on the site rather than part of this app, so
+       there has been no way to find out it exists from in here.
+
+       Linked and not bundled. It is 716 KB against this app's 396, nearly all
+       of that an inlined three.js, and it would land in every installer on
+       every platform for the many people who will never open a fit bench. It
+       also needs nothing the desktop shell provides: no filesystem, no
+       printers, no index. And a link gives whoever clicks it the current
+       version rather than whichever one was frozen into their installer, which
+       matters when Headfit has gone 0.1.0 to 0.8.1 in the time this app moved
+       0.2.28 to 0.2.29.
+
+       A _blank anchor reaches the system browser because tauri-plugin-opener
+       intercepts those clicks by default; the credits links at the bottom of
+       this page already rely on it. */
+    h += '<div class="panel"><h3>'+I.cube+' Headfit</h3>'+
+      '<p style="color:var(--dim);font-size:12.5px;line-height:1.65;margin:0 0 12px">'+
+      'A companion tool for anything worn on the head. Build a head from tape measurements, '+
+      'load a helmet or a mask onto it, and find the tight spots before committing to a print '+
+      'that runs for hours and sometimes days. Clearance painted onto your own head, a section '+
+      'cut through the narrowest point, swept gaskets for a mask seal, and printable sizing '+
+      'rings so you can measure yourself properly in the first place.</p>'+
+      '<a class="b g" href="https://printvault.magikh0e.pl/headfit.html" target="_blank" rel="noopener noreferrer">'+
+        I.ext+' Open Headfit</a>'+
+      '<div class="hint" style="margin-top:10px">Opens in your browser. Nothing you load there leaves it.</div></div>';
+
     h += '<div class="panel"><h3>'+I.print+' Printers</h3>'+
       (Store.printers.length ? '<table class="t"><thead><tr><th>Name</th><th>Model</th><th>Address</th><th class="num">Nozzle</th><th></th></tr></thead><tbody>'+
         Store.printers.map(p=>'<tr><td><b>'+U.esc(p.name)+'</b></td><td>'+U.esc(p.model||'—')+'</td>'+
