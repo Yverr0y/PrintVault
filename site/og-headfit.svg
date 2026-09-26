@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12161e"/><stop offset="1" stop-color="#0a0c10"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="0%" r="70%">
+      <stop offset="0" stop-color="#ff7a2f" stop-opacity=".26"/><stop offset="1" stop-color="#ff7a2f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hot" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff7a2f"/><stop offset="1" stop-color="#ffb057"/>
+    </linearGradient>
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" fill="none" stroke="#677184" stroke-opacity=".16" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- corner ticks, same as the main card so the two read as a set -->
+  <g stroke="#ff7a2f" stroke-opacity=".5" stroke-width="2" fill="none">
+    <path d="M40 62V40h22"/><path d="M1138 40h22v22"/><path d="M1160 568v22h-22"/><path d="M62 590H40v-22"/>
+  </g>
+
+  <g transform="translate(72,86) scale(1.7)">
+    <path d="M16 2 3 9v14l13 7 13-7V9z" fill="none" stroke="#e9edf4" stroke-opacity=".38" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M3 9l13 6.6L29 9M16 15.6V30" fill="none" stroke="#e9edf4" stroke-opacity=".38" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M16 2 3 9l13 6.6L29 9z" fill="#ff7a2f"/>
+  </g>
+  <text x="140" y="126" font-size="34" font-weight="700" fill="#e9edf4" letter-spacing="-1">Head<tspan fill="#ff7a2f">fit</tspan></text>
+
+  <text x="72" y="266" font-size="82" font-weight="800" fill="#e9edf4" letter-spacing="-3.6">Check the fit</text>
+  <text x="72" y="356" font-size="82" font-weight="800" fill="url(#hot)" letter-spacing="-3.6">before the print.</text>
+
+  <text x="72" y="418" font-size="27" fill="#8f9aac" letter-spacing="-.4">Build your head from a tape measure, drop in a helmet or a mask,</text>
+  <text x="72" y="452" font-size="27" fill="#8f9aac" letter-spacing="-.4">and see where it clears you and where it bites.</text>
+
+  <g font-size="18" font-weight="600" letter-spacing="1.4">
+    <rect x="72" y="484" width="232" height="46" rx="3" fill="none" stroke="#313d4e"/>
+    <text x="94" y="513" fill="#e9edf4">CLEARANCE MAP</text>
+    <rect x="320" y="484" width="204" height="46" rx="3" fill="none" stroke="#313d4e"/>
+    <text x="342" y="513" fill="#e9edf4">MASK SEALS</text>
+    <rect x="540" y="484" width="196" height="46" rx="3" fill="none" stroke="#313d4e"/>
+    <text x="562" y="513" fill="#e9edf4">TEST RINGS</text>
+  </g>
+
+  <!-- head in profile with a shell standing off it, which is the whole idea -->
+  <g transform="translate(902,150)">
+    <ellipse cx="128" cy="330" rx="130" ry="18" fill="#ff7a2f" opacity=".16"/>
+
+    <!-- skull, brow, nose, chin, neck -->
+    <path d="M128 36
+             c62 0 104 46 104 108
+             c0 26 -8 44 -22 58
+             l-6 20 l-18 6
+             c2 18 -6 30 -24 34
+             l0 26
+             c0 14 8 20 20 24
+             l0 22 l-108 0 l0 -22
+             c14 -6 22 -16 22 -34
+             l0 -34
+             c-38 -18 -62 -56 -62 -100
+             c0 -62 42 -108 94 -108 z"
+          fill="#e7ebf1" fill-opacity=".92"/>
+    <!-- ear -->
+    <ellipse cx="96" cy="158" rx="15" ry="21" fill="#cfd6e0" fill-opacity=".9"/>
+
+    <!-- the shell, standing clear of the skull, because the gap is the point -->
+    <path d="M2 182 C2 76 58 0 128 0 C198 0 254 76 254 182"
+          fill="none" stroke="#ff7a2f" stroke-opacity=".16" stroke-width="32" stroke-linecap="round"/>
+    <path d="M2 182 C2 76 58 0 128 0 C198 0 254 76 254 182"
+          fill="none" stroke="url(#hot)" stroke-width="12" stroke-linecap="round"/>
+
+    <!-- the gap, called out the way the tool reports it -->
+    <g stroke="#57cdff" stroke-width="2">
+      <path d="M128 34 L128 6" stroke-dasharray="4 4" stroke-opacity=".85"/>
+      <path d="M119 6 h18 M119 34 h18" stroke-opacity=".95"/>
+    </g>
+    <rect x="150" y="2" width="104" height="38" rx="4" fill="#0f141b" stroke="#2a3340"/>
+    <text x="202" y="28" font-size="21" font-weight="700" fill="#57cdff" text-anchor="middle"
+          font-family="Consolas, Menlo, monospace">12 mm</text>
+  </g>
+
+  <rect x="0" y="586" width="1200" height="1" fill="#222a37"/>
+  <text x="72" y="562" font-size="19" fill="#67718a" letter-spacing="2.2">RUNS IN YOUR BROWSER  ·  NOTHING UPLOADED  ·  GPL-3.0</text>
+  <text x="1128" y="562" font-size="19" fill="#67718a" text-anchor="end" letter-spacing="1.4">printvault.magikh0e.pl/headfit</text>
+</svg>

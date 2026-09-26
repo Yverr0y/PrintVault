@@ -34,6 +34,14 @@ NAME=${1:-og}
   { echo "$SITEDIR has no $NAME.svg to render" >&2; exit 1; }
 cd "$SITEDIR"
 
+# The window has to match the svg or Chrome letterboxes or crops it. Read it
+# off the file rather than hardcoding, because the cards are not all one size:
+# Open Graph wants 1200x630 and GitHub wants 1280x640.
+W=$(sed -n 's/.*<svg[^>]* width="\([0-9]*\)".*/\1/p' "$NAME.svg" | head -1)
+H=$(sed -n 's/.*<svg[^>]* height="\([0-9]*\)".*/\1/p' "$NAME.svg" | head -1)
+[ -n "$W" ] && [ -n "$H" ] || { echo "$NAME.svg has no width/height on its <svg> tag" >&2; exit 1; }
+echo "rendering $NAME.svg at ${W}x${H}"
+
 CHROME="/c/Program Files/Google/Chrome/Application/chrome.exe"
 [ -x "$CHROME" ] || CHROME="/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
 [ -x "$CHROME" ] || { echo "No Chrome or Edge found, cannot render the card" >&2; exit 1; }
@@ -41,7 +49,7 @@ CHROME="/c/Program Files/Google/Chrome/Application/chrome.exe"
 # The size is not a guess: the cards are authored at 1200x630 and the pages
 # declare those numbers in og:image:width and og:image:height.
 "$CHROME" --headless --disable-gpu --hide-scrollbars \
-  --window-size=1200,630 \
+  --window-size=$W,$H \
   --screenshot="$(pwd -W 2>/dev/null || pwd)/$NAME.png" \
   "file:///$(pwd -W 2>/dev/null || pwd)/$NAME.svg" 2>/dev/null
 
