@@ -464,7 +464,7 @@ table.t .num{font-family:var(--mono);text-align:right;font-size:12px}
  * Copyright (C) 2026 magikh0e
  * License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html)
  */
-const APP_VERSION = '0.2.32';
+const APP_VERSION = '0.2.33';
 
 /* ============================================================
    U — utilities
@@ -7520,6 +7520,9 @@ const Keys = {
 
 const WhatsNew = {
   notes: [
+    ['0.2.33', [
+      'A security fix in the TLS library the desktop app uses to check for and download updates. Nothing you can see changed; it is worth updating for anyway.'
+    ]],
     ['0.2.32', [
       'Light mode no longer leaves dropdowns and number fields painted dark. It showed up on Linux, where the desktop build takes those from the system theme unless the app says otherwise, and it never said otherwise. Reported by @CleverNimbus.'
     ]],
